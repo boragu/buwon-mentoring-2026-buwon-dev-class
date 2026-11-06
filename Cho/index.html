@@ -1,0 +1,1020 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>용암 탈출 타워</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet" />
+<style>
+  body { font-family: "Noto Sans KR", system-ui, sans-serif; }
+  .font-display { font-family: "Black Han Sans", "Noto Sans KR", sans-serif; letter-spacing: .02em; }
+  canvas { touch-action: none; image-rendering: auto; }
+  .pad-btn { -webkit-user-select: none; user-select: none; touch-action: none; }
+  @keyframes pulseGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(249,115,22,.0);} 50% { box-shadow: 0 0 24px 2px rgba(249,115,22,.45);} }
+  .glow { animation: pulseGlow 1.6s ease-in-out infinite; }
+  @keyframes pop { from { transform: translateY(-6px) scale(.97); opacity: 0;} to { transform: none; opacity: 1;} }
+  .pop { animation: pop .18s ease-out; }
+</style>
+</head>
+<body class="bg-[#0a0605] text-stone-100 min-h-screen">
+<main class="mx-auto flex max-w-[520px] flex-col items-center gap-3 p-3">
+  <header class="flex w-full items-end justify-between gap-2">
+    <div>
+      <h1 class="font-display text-2xl leading-none text-orange-400 sm:text-3xl">용암 탈출 타워</h1>
+      <p class="mt-1 text-xs text-stone-400">퀴즈를 풀어 상자를 얻고, 쌓고, 올라가세요.</p>
+    </div>
+    <div class="hidden text-right text-[11px] leading-4 text-stone-400 sm:block">
+      <div><kbd class="text-stone-200">←→ / A D</kbd> 이동 · <kbd class="text-stone-200">Space / W</kbd> 점프</div>
+      <div><kbd class="text-stone-200">E</kbd>·클릭 상자 놓기 · <kbd class="text-stone-200">Q</kbd> 상자 요청 · <kbd class="text-stone-200">1-4</kbd> 정답</div>
+    </div>
+  </header>
+
+  <div id="stage" class="relative w-full overflow-hidden rounded-xl ring-1 ring-orange-900/60" style="aspect-ratio: 2 / 3;">
+    <canvas id="game" class="absolute inset-0 h-full w-full" aria-label="게임 화면"></canvas>
+
+    <!-- HUD -->
+    <div class="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-2.5">
+      <div class="rounded-lg bg-black/55 px-3 py-2 backdrop-blur-sm ring-1 ring-white/10">
+        <div class="text-[10px] font-bold uppercase tracking-widest text-stone-400">높이</div>
+        <div class="font-display text-2xl leading-none text-amber-300"><span id="hHeight">0.0</span><span class="text-sm text-stone-400"> m</span></div>
+        <div class="mt-1 text-[11px] text-stone-400">최고 <span id="hBest" class="text-stone-200">0.0</span>m · <span id="hTime" class="text-stone-200">0:00</span></div>
+        <div id="hHearts" class="mt-1.5 flex gap-1" aria-label="생명"></div>
+      </div>
+      <div class="flex flex-col items-end gap-1.5">
+        <div class="rounded-lg bg-black/55 px-3 py-1.5 text-right backdrop-blur-sm ring-1 ring-white/10">
+          <div class="text-[10px] font-bold uppercase tracking-widest text-stone-400">용암까지</div>
+          <div id="hLava" class="font-display text-lg leading-none text-orange-400">-</div>
+        </div>
+        <div id="powerups" class="flex flex-col items-end gap-1"></div>
+      </div>
+    </div>
+
+    <div id="toast" class="pointer-events-none absolute left-1/2 top-24 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/70 px-4 py-1.5 text-sm font-bold opacity-0 transition-opacity duration-300 ring-1 ring-white/10"></div>
+
+    <!-- Quiz overlay -->
+    <section id="quiz" class="absolute inset-x-2.5 top-[96px] hidden rounded-xl bg-stone-950/80 p-3 backdrop-blur-md ring-1 ring-white/10 pop" aria-live="polite" role="dialog" aria-labelledby="quizQ">
+      <div class="mb-1.5 flex items-center justify-between">
+        <span id="quizTag" class="rounded px-2 py-0.5 text-[10px] font-black uppercase tracking-widest"></span>
+        <span id="quizReward" class="text-[11px] text-stone-400"></span>
+      </div>
+      <h2 id="quizQ" class="text-[15px] font-bold leading-snug"></h2>
+      <div id="quizChoices" class="mt-2.5 grid grid-cols-2 gap-1.5"></div>
+      <div class="mt-2.5 h-1 overflow-hidden rounded bg-white/10"><div id="quizBar" class="h-full bg-orange-500"></div></div>
+    </section>
+
+    <!-- Start / Game over -->
+    <section id="screen" class="absolute inset-0 flex flex-col items-center justify-center bg-black/70 p-6 text-center backdrop-blur-sm">
+      <h2 id="screenTitle" class="font-display text-4xl text-orange-400">용암 탈출 타워</h2>
+      <p id="screenText" class="mt-3 max-w-xs text-sm leading-relaxed text-stone-300">
+        아래에서 용암이 차오릅니다. 퀴즈를 맞혀 상자를 얻고, 미끄러운 상자를 조심스럽게 쌓아 최대한 높이 올라가세요. <span class="text-fuchsia-300">특수 퀴즈</span>를 맞히면 특별한 능력을 얻습니다. 생명은 3개이며, 중간의 <span class="text-emerald-300">쉼터</span>에서 체크포인트가 저장되고 <span class="text-sky-300">회복 자판기</span>로 생명을 채울 수 있어요.
+      </p>
+      <div class="mt-4 grid grid-cols-2 gap-2 text-left text-[11px] text-stone-300">
+        <div class="flex items-center gap-2"><i class="inline-block h-3 w-3 rounded-sm bg-[#9a5b2f] ring-1 ring-[#e0a86b]"></i>나무 상자</div>
+        <div class="flex items-center gap-2"><i class="inline-block h-3 w-3 rounded-sm bg-[#0e7490] ring-1 ring-[#67e8f9]"></i>판자 (넓고 얇음)</div>
+        <div class="flex items-center gap-2"><i class="inline-block h-3 w-3 rounded-sm bg-[#5b4b8a] ring-1 ring-[#c4b5fd]"></i>철 상자 (무거움)</div>
+        <div class="flex items-center gap-2"><i class="inline-block h-3 w-3 rounded-sm bg-[#475569] ring-1 ring-[#facc15]"></i>앵커 (고정됨)</div>
+      </div>
+      <button id="startBtn" class="glow mt-6 rounded-lg bg-orange-600 px-7 py-3 font-display text-xl text-white hover:bg-orange-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-300">게임 시작</button>
+      <p class="mt-3 text-[11px] text-stone-500">Enter 키로도 시작할 수 있어요</p>
+    </section>
+  </div>
+
+  <!-- Inventory + actions -->
+  <div class="flex w-full items-center gap-2">
+    <div class="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-stone-900/80 px-3 py-2 ring-1 ring-white/10">
+      <span class="shrink-0 text-[10px] font-bold uppercase tracking-widest text-stone-400">보유</span>
+      <div id="inventory" class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"></div>
+      <span id="invCount" class="shrink-0 font-display text-lg text-amber-300">0</span>
+    </div>
+    <button id="btnRequest" class="shrink-0 rounded-lg bg-amber-500 px-3 py-2.5 text-sm font-black text-stone-950 hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-400">상자 요청 <span class="opacity-60">Q</span></button>
+    <button id="btnDrop" class="shrink-0 rounded-lg bg-stone-200 px-3 py-2.5 text-sm font-black text-stone-950 hover:bg-white disabled:cursor-not-allowed disabled:bg-stone-700 disabled:text-stone-400">놓기 <span class="opacity-60">E</span></button>
+  </div>
+
+  <!-- Touch pad -->
+  <div class="grid w-full grid-cols-4 gap-2 sm:hidden" aria-label="터치 조작">
+    <button class="pad-btn rounded-lg bg-stone-800 py-4 font-black" data-key="left" aria-label="왼쪽">◀</button>
+    <button class="pad-btn rounded-lg bg-stone-800 py-4 font-black" data-key="right" aria-label="오른쪽">▶</button>
+    <button class="pad-btn col-span-2 rounded-lg bg-orange-700 py-4 font-black" data-key="jump">점프</button>
+  </div>
+</main>
+
+<script>
+(() => {
+  const { Engine, Bodies, Body, Composite, Events, Query } = Matter;
+
+  // ---------- Constants ----------
+  const W = 480, H = 720, WALL = 16, PX_PER_M = 40;
+  const STEP_MS = 1000 / 120;
+  const BOX_TYPES = {
+    normal: { name: '나무 상자', w: 64, h: 44, density: 0.002, friction: 0.03, frictionStatic: 0.1, restitution: 0.15, fill: '#9a5b2f', edge: '#e0a86b' },
+    plank:  { name: '판자',     w: 124, h: 22, density: 0.0016, friction: 0.03, frictionStatic: 0.1, restitution: 0.12, fill: '#0e7490', edge: '#67e8f9' },
+    heavy:  { name: '철 상자',  w: 46, h: 46, density: 0.006, friction: 0.04, frictionStatic: 0.12, restitution: 0.08, fill: '#5b4b8a', edge: '#c4b5fd' },
+    anchor: { name: '앵커',     w: 150, h: 34, density: 0.02, friction: 0.9, frictionStatic: 2, restitution: 0, fill: '#475569', edge: '#facc15' },
+  };
+  const ABILITIES = {
+    sticky:    { name: '끈끈한 상자', color: '#4ade80', duration: 12 },
+    freeze:    { name: '용암 정지',   color: '#38bdf8', duration: 8 },
+    superjump: { name: '슈퍼 점프',   color: '#f472b6', duration: 12 },
+    anchor:    { name: '앵커 상자',   color: '#facc15', duration: 0 },
+  };
+
+  // ---------- DOM ----------
+  const $ = (id) => document.getElementById(id);
+  const canvas = $('game'), ctx = canvas.getContext('2d');
+  const ui = {
+    height: $('hHeight'), best: $('hBest'), hearts: $('hHearts'), time: $('hTime'), lava: $('hLava'),
+    powerups: $('powerups'), inventory: $('inventory'), invCount: $('invCount'),
+    toast: $('toast'), request: $('btnRequest'), drop: $('btnDrop'),
+    quiz: $('quiz'), quizTag: $('quizTag'), quizReward: $('quizReward'), quizQ: $('quizQ'),
+    quizChoices: $('quizChoices'), quizBar: $('quizBar'),
+    screen: $('screen'), screenTitle: $('screenTitle'), screenText: $('screenText'), startBtn: $('startBtn'),
+  };
+
+  function resizeCanvas() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resizeCanvas();
+
+  // ---------- State ----------
+  let engine, player, floor, boxes, particles, platforms, rests, S;
+  const MAX_HEARTS = 3;
+  const REST_EVERY = 13 * PX_PER_M;
+  const SHELF_W = 210, SHELF_H = 22;
+  let bestHeight = 0;
+  const input = { left: false, right: false, jump: false };
+  const mouse = { inside: false, x: W / 2 };
+
+  function resetState() {
+    S = {
+      running: false, over: false, time: 0,
+      camY: -H + 120, lavaY: 150, maxH: 0, height: 0,
+      hearts: MAX_HEARTS, invuln: 0, lavaPause: 0,
+      checkpoint: { x: W / 2, y: -24, label: '시작 지점' },
+      nextRestY: -10 * PX_PER_M, nextAnchorY: -170, restSide: Math.random() < 0.5 ? -1 : 1,
+      inventory: ['normal', 'normal', 'plank'],
+      abilities: { sticky: 0, freeze: 0, superjump: 0 },
+      controlLock: 0, jumpCd: 0, dropCd: 0, requestCd: 0,
+      autoQuizTimer: 10, quizCount: 0, sinceSpecial: 0,
+      quiz: null, shake: 0,
+    };
+  }
+
+  // ---------- Physics world ----------
+  function buildWorld() {
+    engine = Engine.create({ positionIterations: 10, velocityIterations: 8, constraintIterations: 4 });
+    engine.gravity.y = 1;
+    boxes = []; particles = []; platforms = []; rests = [];
+
+    const wallOpts = (side) => ({ isStatic: true, restitution: 0.75, friction: 0.05, label: 'wall', plugin: { side } });
+    const leftWall = Bodies.rectangle(WALL - 200, -90000, 400, 200000, wallOpts(1));
+    const rightWall = Bodies.rectangle(W - WALL + 200, -90000, 400, 200000, wallOpts(-1));
+    floor = Bodies.rectangle(W / 2, 200, W + 800, 400, { isStatic: true, friction: 0.6, restitution: 0.05, label: 'floor' });
+
+    player = Bodies.rectangle(W / 2, -24, 26, 38, {
+      label: 'player', friction: 0.02, frictionStatic: 0.05, frictionAir: 0.01, restitution: 0, density: 0.002,
+      chamfer: { radius: 6 },
+    });
+    Body.setInertia(player, Infinity);
+
+    Composite.add(engine.world, [leftWall, rightWall, floor, player]);
+    generateUpTo(-H * 2);
+
+    Events.on(engine, 'beforeUpdate', controlStep);
+    Events.on(engine, 'afterUpdate', clampSpeeds);
+    Events.on(engine, 'collisionStart', onCollision);
+  }
+
+  function groundables() { return [floor, ...platforms, ...boxes]; }
+
+  function isGrounded() {
+    if (player.velocity.y < -0.8) return false;
+    const y = player.bounds.max.y + 3;
+    const xs = [player.bounds.min.x + 3, player.position.x, player.bounds.max.x - 3];
+    const bodies = groundables();
+    return xs.some((x) => Query.point(bodies, { x, y }).length > 0);
+  }
+
+  function controlStep() {
+    if (!S.running || S.over) return;
+    const dt = STEP_MS / 1000;
+    const grounded = isGrounded();
+    const dir = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    const target = dir * 3.6;
+    const blend = S.controlLock > 0 ? 0.015 : grounded ? 0.22 : 0.09;
+    const v = player.velocity;
+    let vx = v.x + (target - v.x) * blend;
+    let vy = v.y;
+    if (input.jump && grounded && S.jumpCd <= 0) {
+      vy = S.abilities.superjump > 0 ? -12.6 : -8.6;
+      S.jumpCd = 0.22;
+      spawnBurst(player.position.x, player.bounds.max.y, S.abilities.superjump > 0 ? '#f472b6' : '#d6d3d1', 6, 1.5);
+    }
+    Body.setVelocity(player, { x: vx, y: vy });
+    S.controlLock = Math.max(0, S.controlLock - dt);
+    S.jumpCd = Math.max(0, S.jumpCd - dt);
+  }
+
+  function clampSpeeds() {
+    const max = 22;
+    for (const b of boxes) {
+      const v = b.velocity, s = Math.hypot(v.x, v.y);
+      if (s > max) Body.setVelocity(b, { x: (v.x / s) * max, y: (v.y / s) * max });
+    }
+  }
+
+  function onCollision(ev) {
+    for (const pair of ev.pairs) {
+      const { bodyA, bodyB } = pair;
+      const wall = bodyA.label === 'wall' ? bodyA : bodyB.label === 'wall' ? bodyB : null;
+      if (!wall) continue;
+      const other = wall === bodyA ? bodyB : bodyA;
+      const side = wall.plugin.side;
+      if (other === player) {
+        const speed = Math.max(4.5, Math.abs(player.velocity.x) * 1.1);
+        Body.setVelocity(player, { x: side * speed, y: player.velocity.y * 0.9 });
+        S.controlLock = 0.22;
+        spawnBurst(side > 0 ? WALL : W - WALL, player.position.y, '#fde68a', 8, 2.5);
+      } else if (other.label === 'box' && Math.abs(other.velocity.x) > 2) {
+        spawnBurst(side > 0 ? WALL : W - WALL, other.position.y, '#fdba74', 5, 2);
+      }
+    }
+  }
+
+  // ---------- Boxes ----------
+  function applyBoxFriction(b) {
+    const t = BOX_TYPES[b.plugin.kind];
+    if (S.abilities.sticky > 0 && b.plugin.kind !== 'anchor') { b.friction = 1; b.frictionStatic = 8; }
+    else { b.friction = t.friction; b.frictionStatic = t.frictionStatic; }
+  }
+
+  function spawnPosition(kind, x) {
+    const t = BOX_TYPES[kind];
+    const cx = Math.max(WALL + t.w / 2 + 2, Math.min(W - WALL - t.w / 2 - 2, x));
+    let cy = player.position.y - 150;
+    const others = [player, ...platforms, ...boxes];
+    for (let i = 0; i < 8; i++) {
+      const bounds = { min: { x: cx - t.w / 2, y: cy - t.h / 2 }, max: { x: cx + t.w / 2, y: cy + t.h / 2 } };
+      if (Query.region(others, bounds).length === 0) break;
+      cy -= 40;
+    }
+    return { x: cx, y: cy };
+  }
+
+  function dropBox(atX) {
+    if (!S.running || S.over || S.dropCd > 0) return;
+    if (S.inventory.length === 0) { toast('상자가 없어요! 퀴즈를 풀어 얻으세요', '#fca5a5'); return; }
+    const kind = S.inventory.shift();
+    const t = BOX_TYPES[kind];
+    const pos = spawnPosition(kind, atX ?? player.position.x);
+    const b = Bodies.rectangle(pos.x, pos.y, t.w, t.h, {
+      label: 'box', density: t.density, restitution: t.restitution, frictionAir: 0.005,
+      chamfer: { radius: 3 }, plugin: { kind, w: t.w, h: t.h, settle: 0, born: S.time },
+    });
+    applyBoxFriction(b);
+    Body.setAngle(b, (Math.random() - 0.5) * 0.08);
+    boxes.push(b);
+    Composite.add(engine.world, b);
+    S.dropCd = 0.35;
+    renderInventory();
+  }
+
+  function addToInventory(kind) {
+    S.inventory.push(kind);
+    renderInventory();
+  }
+
+  function randomBoxKind() {
+    const r = Math.random();
+    return r < 0.58 ? 'normal' : r < 0.84 ? 'plank' : 'heavy';
+  }
+
+  function updateAnchors(dt) {
+    for (const b of boxes) {
+      if (b.plugin.kind !== 'anchor' || b.isStatic) continue;
+      const slow = Math.hypot(b.velocity.x, b.velocity.y) < 0.25 && S.time - b.plugin.born > 0.3;
+      b.plugin.settle = slow ? b.plugin.settle + dt : 0;
+      if (b.plugin.settle > 0.25) {
+        Body.setStatic(b, true);
+        spawnBurst(b.position.x, b.position.y, '#facc15', 14, 3);
+        toast('앵커 고정 완료', '#facc15');
+      }
+    }
+  }
+
+  // ---------- World features: rest shelves, vending machines, fixed anchor blocks ----------
+  function createRest(y) {
+    const side = S.restSide; S.restSide *= -1;
+    const x = side < 0 ? WALL + SHELF_W / 2 : W - WALL - SHELF_W / 2;
+    const body = Bodies.rectangle(x, y, SHELF_W, SHELF_H, { isStatic: true, friction: 0.8, restitution: 0, label: 'platform', plugin: { kind: 'shelf' } });
+    platforms.push(body);
+    Composite.add(engine.world, body);
+    const vendX = side < 0 ? WALL + 26 : W - WALL - 26;
+    rests.push({
+      y, side, x, reached: false, meters: Math.round(-y / PX_PER_M),
+      vend: { x: vendX, y: y - SHELF_H / 2 - 28, w: 34, h: 56, used: false },
+    });
+  }
+
+  function createAnchorBlock(y) {
+    const w = rnd(76, 104);
+    const x = rnd(WALL + w / 2 + 6, W - WALL - w / 2 - 6);
+    const body = Bodies.rectangle(x, y, w, 18, { isStatic: true, friction: 0.8, restitution: 0, label: 'platform', plugin: { kind: 'anchorBlock', w, h: 18 } });
+    platforms.push(body);
+    Composite.add(engine.world, body);
+  }
+
+  function generateUpTo(yTop) {
+    while (S.nextRestY > yTop) { createRest(S.nextRestY); S.nextRestY -= REST_EVERY; }
+    while (S.nextAnchorY > yTop) {
+      const y = S.nextAnchorY;
+      const nearRest = rests.some((r) => Math.abs(r.y - y) < 110) || Math.abs(S.nextRestY - y) < 110;
+      if (!nearRest) createAnchorBlock(y);
+      S.nextAnchorY -= rnd(150, 200);
+    }
+  }
+
+  function overlaps(a, r) {
+    return a.max.x > r.x - r.w / 2 && a.min.x < r.x + r.w / 2 && a.max.y > r.y - r.h / 2 && a.min.y < r.y + r.h / 2;
+  }
+
+  function updateFeatures() {
+    const pb = player.bounds;
+    for (const r of rests) {
+      const minX = r.x - SHELF_W / 2 - 4, maxX = r.x + SHELF_W / 2 + 4;
+      if (!r.reached && player.position.x > minX && player.position.x < maxX && pb.max.y <= r.y - SHELF_H / 2 + 3 && pb.max.y > r.y - SHELF_H / 2 - 60) {
+        r.reached = true;
+        S.checkpoint = { x: r.x + r.side * -30, y: r.y - SHELF_H / 2 - 20, label: `${r.meters}m 쉼터` };
+        S.lavaPause = Math.max(S.lavaPause, 4);
+        spawnBurst(player.position.x, pb.max.y, '#6ee7b7', 20, 3);
+        toast(`${r.meters}m 쉼터 도착! 체크포인트 저장`, '#6ee7b7');
+      }
+      if (!r.vend.used && overlaps(pb, r.vend)) {
+        r.vend.used = true;
+        const healed = S.hearts < MAX_HEARTS;
+        S.hearts = Math.min(MAX_HEARTS, S.hearts + 1);
+        addToInventory('normal'); addToInventory(randomBoxKind());
+        spawnBurst(r.vend.x, r.vend.y, '#7dd3fc', 24, 3.5);
+        toast(healed ? '회복 자판기: 생명 +1, 상자 +2' : '회복 자판기: 상자 +2', '#7dd3fc');
+      }
+    }
+  }
+
+  function hurtPlayer() {
+    S.hearts--;
+    S.shake = 10;
+    spawnBurst(player.position.x, player.position.y, '#f97316', 30, 5);
+    if (S.hearts <= 0) { gameOver(); return; }
+    const cp = S.checkpoint;
+    Body.setPosition(player, { x: cp.x, y: cp.y });
+    Body.setVelocity(player, { x: 0, y: 0 });
+    S.lavaY = Math.max(S.lavaY, cp.y + 360);
+    S.invuln = 2.5;
+    S.lavaPause = Math.max(S.lavaPause, 3);
+    toast(`앗 뜨거! ${cp.label}(으)로 복귀 · 남은 생명 ${S.hearts}`, '#fca5a5');
+  }
+
+  // ---------- Quiz ----------
+  const REGULAR_FACTS = [
+    ['대한민국의 수도는?', '서울', ['부산', '인천', '대전']],
+    ['물의 화학식은?', 'H₂O', ['CO₂', 'O₂', 'NaCl']],
+    ['태양계에서 가장 큰 행성은?', '목성', ['토성', '지구', '해왕성']],
+    ['거미의 다리는 몇 개일까?', '8개', ['6개', '10개', '4개']],
+    ['한글을 창제한 왕은?', '세종대왕', ['태조', '정조', '광개토대왕']],
+    ['빛의 삼원색이 아닌 것은?', '노랑', ['빨강', '초록', '파랑']],
+    ['정삼각형의 한 내각은?', '60°', ['90°', '45°', '120°']],
+    ['지구에서 가장 넓은 바다는?', '태평양', ['대서양', '인도양', '북극해']],
+    ['화산에서 지표로 흘러나온 녹은 암석은?', '용암', ['마그마', '석회암', '화강암']],
+    ['1킬로미터는 몇 미터?', '1000m', ['100m', '10000m', '500m']],
+    ['축구 한 팀의 경기 출전 선수 수는?', '11명', ['9명', '10명', '12명']],
+    ['얼음이 녹기 시작하는 온도(1기압)는?', '0°C', ['10°C', '-10°C', '4°C']],
+    ['무지개는 보통 몇 가지 색으로 표현할까?', '7가지', ['5가지', '6가지', '8가지']],
+    ['펭귄이 주로 사는 곳은?', '남극', ['북극', '사하라', '아마존']],
+    ['낮과 밤이 생기는 이유는?', '지구의 자전', ['지구의 공전', '달의 공전', '태양의 자전']],
+  ];
+  const SPECIAL_FACTS = [
+    ['지구 대기에서 가장 많은 기체는?', '질소', ['산소', '수소', '헬륨']],
+    ['자연에서 가장 단단한 광물은?', '다이아몬드', ['금', '소금', '유리']],
+    ['인체에서 가장 큰 기관은?', '피부', ['간', '심장', '눈']],
+    ['소리가 전달되지 않는 곳은?', '우주(진공)', ['물속', '공기 중', '나무 속']],
+    ['태양계에서 태양과 가장 가까운 행성은?', '수성', ['금성', '화성', '목성']],
+    ['식물이 햇빛으로 양분을 만드는 과정은?', '광합성', ['호흡', '증발', '소화']],
+    ['자석의 두 극은?', 'N극과 S극', ['A극과 B극', '동극과 서극', '위극과 아래극']],
+    ['우리나라 국보 제1호였던 문화재는?', '숭례문', ['경복궁', '첨성대', '석굴암']],
+    ['지구의 위성은?', '달', ['태양', '화성', '북극성']],
+    ['물이 끓는 온도(1기압)는?', '100°C', ['50°C', '0°C', '200°C']],
+    ['화산이 폭발할 때 분출되는 것이 아닌 것은?', '눈송이', ['용암', '화산재', '화산가스']],
+    ['하루는 몇 시간일까?', '24시간', ['12시간', '20시간', '36시간']],
+    ['곤충의 다리는 몇 개일까?', '6개', ['4개', '8개', '10개']],
+    ['한국의 전통 명절이 아닌 것은?', '할로윈', ['설날', '추석', '단오']],
+    ['가장 큰 포유류는?', '흰긴수염고래', ['코끼리', '기린', '하마']],
+  ];
+
+  const rnd = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
+  const shuffle = (arr) => { for (let i = arr.length - 1; i > 0; i--) { const j = rnd(0, i); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
+  function numericDistractors(answer, spread) {
+    const set = new Set();
+    while (set.size < 3) {
+      const d = answer + (rnd(1, spread) * (Math.random() < 0.5 ? -1 : 1));
+      if (d !== answer && d >= 0) set.add(d);
+    }
+    return [...set].map(String);
+  }
+
+  function makeRegularQuestion() {
+    if (Math.random() < 0.5) {
+      const [q, a, wrong] = REGULAR_FACTS[rnd(0, REGULAR_FACTS.length - 1)];
+      return { q, answer: a, choices: shuffle([a, ...wrong]) };
+    }
+    const kind = rnd(0, 2);
+    let q, a;
+    if (kind === 0) { const x = rnd(2, 15), y = rnd(1, 9); q = `${x} + ${y} = ?`; a = x + y; }
+    else if (kind === 1) { const x = rnd(2, 5), y = rnd(1, 5); q = `${x} × ${y} = ?`; a = x * y; }
+    else { const x = rnd(10, 20), y = rnd(1, 9); q = `${x} − ${y} = ?`; a = x - y; }
+    return { q, answer: String(a), choices: shuffle([String(a), ...numericDistractors(a, 6)]) };
+  }
+
+  function makeSpecialQuestion() {
+    if (Math.random() < 0.5) {
+      const [q, a, wrong] = SPECIAL_FACTS[rnd(0, SPECIAL_FACTS.length - 1)];
+      return { q, answer: a, choices: shuffle([a, ...wrong]) };
+    }
+    const kind = rnd(0, 3);
+    let q, a;
+    if (kind === 0) { const x = rnd(3, 9), y = rnd(3, 9); q = `${x} × ${y} = ?`; a = x * y; }
+    else if (kind === 1) { const x = rnd(15, 49), y = rnd(11, 39); q = `${x} + ${y} = ?`; a = x + y; }
+    else if (kind === 2) { const x = rnd(2, 9); q = `□ + ${x} = ${x * 2 + 3} 일 때, □는?`; a = x + 3; }
+    else { const x = rnd(30, 60), y = rnd(11, 25); q = `${x} − ${y} = ?`; a = x - y; }
+    return { q, answer: String(a), choices: shuffle([String(a), ...numericDistractors(a, 8)]) };
+  }
+
+  function openQuiz(fromRequest) {
+    if (!S.running || S.over || S.quiz) return;
+    if (fromRequest && S.requestCd > 0) return;
+    S.quizCount++;
+    S.sinceSpecial++;
+    const special = S.quizCount > 1 && (Math.random() < 0.22 || S.sinceSpecial >= 5);
+    if (special) S.sinceSpecial = 0;
+    const data = special ? makeSpecialQuestion() : makeRegularQuestion();
+    const total = special ? 18 : 15;
+    S.quiz = { ...data, special, timeLeft: total, total, locked: false };
+    S.autoQuizTimer = 15;
+
+    ui.quizTag.textContent = special ? 'SPECIAL 특수 퀴즈' : '퀴즈';
+    ui.quizTag.className = 'rounded px-2 py-0.5 text-[10px] font-black uppercase tracking-widest ' +
+      (special ? 'bg-fuchsia-500/20 text-fuchsia-300 ring-1 ring-fuchsia-400/40' : 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/40');
+    ui.quizReward.textContent = special ? '보상: 랜덤 특수 능력' : '보상: 상자 1개';
+    ui.quiz.classList.toggle('ring-fuchsia-500/50', special);
+    ui.quizBar.className = 'h-full ' + (special ? 'bg-fuchsia-500' : 'bg-orange-500');
+    ui.quizQ.textContent = data.q;
+    ui.quizChoices.innerHTML = '';
+    data.choices.forEach((c, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'flex items-center gap-2 rounded-md bg-white/5 px-2.5 py-2 text-left text-sm font-medium ring-1 ring-white/10 hover:bg-white/10 focus:outline-none focus-visible:ring-orange-400';
+      btn.innerHTML = `<span class="font-display text-xs text-stone-500">${i + 1}</span><span></span>`;
+      btn.lastChild.textContent = c;
+      btn.addEventListener('click', () => answerQuiz(i));
+      ui.quizChoices.appendChild(btn);
+    });
+    ui.quiz.classList.remove('hidden', 'pop'); void ui.quiz.offsetWidth; ui.quiz.classList.add('pop');
+  }
+
+  function answerQuiz(index) {
+    const quiz = S.quiz;
+    if (!quiz || quiz.locked) return;
+    quiz.locked = true;
+    const chosen = index == null ? null : quiz.choices[index];
+    const correct = chosen === quiz.answer;
+    [...ui.quizChoices.children].forEach((btn, i) => {
+      const c = quiz.choices[i];
+      if (c === quiz.answer) btn.className += ' !bg-emerald-600/60 !ring-emerald-400';
+      else if (i === index) btn.className += ' !bg-red-700/60 !ring-red-400';
+      btn.disabled = true;
+    });
+
+    if (correct) {
+      if (quiz.special) grantAbility();
+      else { const k = randomBoxKind(); addToInventory(k); toast(`정답! ${BOX_TYPES[k].name} 획득`, '#fcd34d'); }
+      S.requestCd = 0.6;
+    } else {
+      toast(index == null ? '시간 초과!' : `오답! 정답: ${quiz.answer}`, '#fca5a5');
+      S.requestCd = 1.5;
+    }
+    setTimeout(() => { S.quiz = null; ui.quiz.classList.add('hidden'); }, correct ? 450 : 1100);
+  }
+
+  function grantAbility() {
+    const keys = Object.keys(ABILITIES);
+    const key = keys[rnd(0, keys.length - 1)];
+    const ab = ABILITIES[key];
+    if (key === 'anchor') {
+      S.inventory.unshift('anchor');
+      renderInventory();
+      toast('특수 능력: 앵커 상자 (다음 놓기)', ab.color);
+    } else {
+      S.abilities[key] = ab.duration;
+      if (key === 'sticky') boxes.forEach(applyBoxFriction);
+      toast(`특수 능력: ${ab.name}!`, ab.color);
+    }
+    spawnBurst(player.position.x, player.position.y, ab.color, 22, 4);
+  }
+
+  // ---------- Particles ----------
+  function spawnBurst(x, y, color, n, speed) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, s = Math.random() * speed + 0.5;
+      particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 1, life: 0.5 + Math.random() * 0.5, max: 1, color, size: 1.5 + Math.random() * 2 });
+    }
+  }
+  const embers = Array.from({ length: 50 }, () => ({ x: Math.random() * W, y: Math.random() * H, s: 0.3 + Math.random() * 1.2, r: 0.6 + Math.random() * 1.6, p: Math.random() * 6 }));
+
+  // ---------- UI helpers ----------
+  let toastTimer;
+  function toast(text, color = '#fff') {
+    ui.toast.textContent = text;
+    ui.toast.style.color = color;
+    ui.toast.style.opacity = '1';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (ui.toast.style.opacity = '0'), 1500);
+  }
+
+  function renderInventory() {
+    ui.inventory.innerHTML = '';
+    S.inventory.slice(0, 10).forEach((k, i) => {
+      const t = BOX_TYPES[k];
+      const el = document.createElement('span');
+      const w = Math.max(10, Math.round(t.w / 5)), h = Math.max(8, Math.round(t.h / 3.2));
+      el.className = 'inline-block shrink-0 rounded-sm' + (i === 0 ? ' ring-2 ring-white/80' : ' ring-1');
+      el.style.cssText = `width:${w}px;height:${h}px;background:${t.fill};--tw-ring-color:${i === 0 ? '' : t.edge}`;
+      el.title = t.name;
+      ui.inventory.appendChild(el);
+    });
+    if (S.inventory.length === 0) ui.inventory.innerHTML = '<span class="truncate text-xs text-stone-500">비어 있음 — 퀴즈를 풀어 상자를 얻으세요</span>';
+    ui.invCount.textContent = S.inventory.length;
+  }
+
+  let lastHud = '', lastHearts = -1;
+  const HEART_SVG = (on) => `<svg width="16" height="15" viewBox="0 0 24 22" aria-hidden="true"><path d="M12 21s-8.5-5.3-10.6-10.1C-.2 7 2.2 2 6.6 2c2.4 0 4 1.3 5.4 3.1C13.4 3.3 15 2 17.4 2c4.4 0 6.8 5 5.2 8.9C20.5 15.7 12 21 12 21z" fill="${on ? '#ef4444' : 'rgba(255,255,255,.12)'}" stroke="${on ? '#fca5a5' : 'rgba(255,255,255,.2)'}" stroke-width="1.5"/></svg>`;
+  function updateHud() {
+    if (S.hearts !== lastHearts) {
+      lastHearts = S.hearts;
+      ui.hearts.innerHTML = Array.from({ length: MAX_HEARTS }, (_, i) => HEART_SVG(i < S.hearts)).join('');
+      ui.hearts.setAttribute('aria-label', `생명 ${S.hearts}개`);
+    }
+    ui.height.textContent = S.height.toFixed(1);
+    ui.best.textContent = Math.max(bestHeight, S.maxH).toFixed(1);
+    const sec = Math.floor(S.time);
+    ui.time.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+    const dist = Math.max(0, (S.lavaY - player.bounds.max.y) / PX_PER_M);
+    ui.lava.textContent = `${dist.toFixed(1)}m`;
+    ui.lava.className = 'font-display text-lg leading-none ' + (dist < 3 ? 'text-red-400' : dist < 7 ? 'text-orange-400' : 'text-emerald-300');
+
+    const key = Object.entries(S.abilities).map(([k, v]) => `${k}:${Math.ceil(v * 4)}`).join('|');
+    if (key !== lastHud) {
+      lastHud = key;
+      ui.powerups.innerHTML = '';
+      for (const [k, v] of Object.entries(S.abilities)) {
+        if (v <= 0) continue;
+        const ab = ABILITIES[k];
+        const chip = document.createElement('div');
+        chip.className = 'w-28 rounded-md bg-black/60 px-2 py-1 ring-1 backdrop-blur-sm';
+        chip.style.setProperty('--tw-ring-color', ab.color + '66');
+        chip.innerHTML = `<div class="flex justify-between text-[11px] font-bold" style="color:${ab.color}"><span>${ab.name}</span><span>${Math.ceil(v)}s</span></div>
+          <div class="mt-0.5 h-1 rounded bg-white/10"><div class="h-full rounded" style="width:${(v / ab.duration) * 100}%;background:${ab.color}"></div></div>`;
+        ui.powerups.appendChild(chip);
+      }
+    }
+    ui.request.disabled = !S.running || S.over || !!S.quiz || S.requestCd > 0;
+    ui.drop.disabled = !S.running || S.over || S.inventory.length === 0;
+    if (S.quiz) ui.quizBar.style.width = `${(S.quiz.timeLeft / S.quiz.total) * 100}%`;
+  }
+
+  // ---------- Game flow ----------
+  function startGame() {
+    if (engine) { Events.off(engine); Composite.clear(engine.world, false); Engine.clear(engine); }
+    resetState();
+    buildWorld();
+    S.running = true;
+    ui.screen.classList.add('hidden');
+    ui.quiz.classList.add('hidden');
+    renderInventory();
+    lastHud = '';
+    toast('용암이 곧 차오릅니다!', '#fdba74');
+    canvas.focus?.();
+  }
+
+  function gameOver() {
+    S.over = true;
+    S.shake = 14;
+    spawnBurst(player.position.x, player.position.y, '#f97316', 40, 6);
+    const newBest = S.maxH > bestHeight;
+    bestHeight = Math.max(bestHeight, S.maxH);
+    S.quiz = null; ui.quiz.classList.add('hidden');
+    setTimeout(() => {
+      ui.screenTitle.textContent = '용암에 빠졌습니다';
+      ui.screenText.innerHTML = `최고 높이 <b class="text-amber-300">${S.maxH.toFixed(1)}m</b> · 생존 시간 <b class="text-stone-100">${Math.floor(S.time)}초</b>` +
+        (newBest ? '<br><span class="text-emerald-300">새로운 최고 기록!</span>' : `<br><span class="text-stone-400">최고 기록 ${bestHeight.toFixed(1)}m</span>`);
+      ui.startBtn.textContent = '다시 도전';
+      ui.screen.classList.remove('hidden');
+      ui.startBtn.focus();
+    }, 900);
+  }
+
+  function update(dt) {
+    if (!S.running || S.over) return;
+    S.time += dt;
+
+    // physics (fixed sub-steps for stability / less tunneling)
+    let steps = Math.min(8, Math.round(dt / (STEP_MS / 1000)));
+    for (let i = 0; i < Math.max(1, steps); i++) Engine.update(engine, STEP_MS);
+
+    // timers
+    S.dropCd = Math.max(0, S.dropCd - dt);
+    S.requestCd = Math.max(0, S.requestCd - dt);
+    for (const k of Object.keys(S.abilities)) {
+      if (S.abilities[k] > 0) {
+        S.abilities[k] = Math.max(0, S.abilities[k] - dt);
+        if (S.abilities[k] === 0) {
+          if (k === 'sticky') boxes.forEach(applyBoxFriction);
+          toast(`${ABILITIES[k].name} 종료`, '#a8a29e');
+        }
+      }
+    }
+    updateAnchors(dt);
+
+    // quiz timers
+    if (S.quiz && !S.quiz.locked) {
+      S.quiz.timeLeft -= dt;
+      if (S.quiz.timeLeft <= 0) answerQuiz(null);
+    } else if (!S.quiz) {
+      S.autoQuizTimer -= dt;
+      if (S.autoQuizTimer <= 0) openQuiz(false);
+    }
+
+    // height & lava
+    S.height = Math.max(0, -player.bounds.max.y / PX_PER_M);
+    S.maxH = Math.max(S.maxH, S.height);
+    S.lavaPause = Math.max(0, S.lavaPause - dt);
+    S.invuln = Math.max(0, S.invuln - dt);
+    if (S.time > 10 && S.abilities.freeze <= 0 && S.lavaPause <= 0) {
+      let speed = Math.min(26, 4.5 + S.maxH * 0.22);
+      const screenBottom = S.camY + H;
+      if (S.lavaY > screenBottom + 80) speed += 22;
+      S.lavaY -= speed * dt;
+    }
+
+    // boxes don't burn; only silently drop ones far below the lava for performance
+    for (let i = boxes.length - 1; i >= 0; i--) {
+      const b = boxes[i];
+      if (b.bounds.min.y > S.lavaY + 1500) {
+        Composite.remove(engine.world, b);
+        boxes.splice(i, 1);
+      }
+    }
+
+    generateUpTo(S.camY - H);
+    updateFeatures();
+
+    // camera
+    const target = Math.min(-H + 120, player.position.y - H * 0.58);
+    S.camY += (target - S.camY) * Math.min(1, dt * 5);
+
+    if (player.bounds.max.y > S.lavaY + 4 && S.invuln <= 0) hurtPlayer();
+  }
+
+  // ---------- Rendering ----------
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+
+  function drawBackground(t) {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#0c0807'); g.addColorStop(0.6, '#1a0d09'); g.addColorStop(1, '#3a120a');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+    // parallax cave silhouettes
+    const layers = [{ p: 0.25, c: '#140b09', amp: 60 }, { p: 0.5, c: '#1b0f0b', amp: 40 }];
+    for (const L of layers) {
+      ctx.fillStyle = L.c;
+      const off = (S.camY * L.p) % 400;
+      for (const side of [0, 1]) {
+        ctx.beginPath();
+        const baseX = side ? W : 0;
+        ctx.moveTo(baseX, -10);
+        for (let y = -400; y <= H + 400; y += 40) {
+          const wy = y - off;
+          const n = Math.sin((y + S.camY * L.p) * 0.013 + side * 3) * 0.5 + Math.sin((y + S.camY * L.p) * 0.031 + side) * 0.5;
+          const x = side ? W - (40 + L.amp + n * L.amp) : 40 + L.amp + n * L.amp;
+          ctx.lineTo(x, wy);
+        }
+        ctx.lineTo(baseX, H + 10);
+        ctx.closePath(); ctx.fill();
+      }
+    }
+
+    // embers
+    for (const e of embers) {
+      e.y -= e.s; e.x += Math.sin(t * 0.001 + e.p) * 0.3;
+      if (e.y < -5) { e.y = H + 5; e.x = Math.random() * W; }
+      const a = 0.25 + 0.35 * Math.sin(t * 0.004 + e.p);
+      ctx.fillStyle = `rgba(251,146,60,${a})`;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function drawWalls() {
+    const top = S.camY - 20, bottom = S.camY + H + 20;
+    for (const x0 of [0, W - WALL]) {
+      ctx.fillStyle = '#2a1d18';
+      ctx.fillRect(x0, top, WALL, bottom - top);
+      ctx.strokeStyle = '#3d2a22'; ctx.lineWidth = 1;
+      const start = Math.floor(top / 24) * 24;
+      for (let y = start; y < bottom; y += 24) {
+        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + WALL, y); ctx.stroke();
+        const mx = x0 + ((y / 24) % 2 === 0 ? 8 : 4);
+        ctx.beginPath(); ctx.moveTo(mx, y); ctx.lineTo(mx, y + 24); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(251,146,60,.18)';
+      ctx.fillRect(x0 === 0 ? WALL - 2 : W - WALL, top, 2, bottom - top);
+    }
+    // height markers every 5m
+    ctx.font = '700 10px "Noto Sans KR", sans-serif';
+    ctx.textBaseline = 'middle';
+    const step = 5 * PX_PER_M;
+    const first = Math.floor(top / step) * step;
+    for (let y = first; y < bottom; y += step) {
+      if (y > 0) continue;
+      ctx.strokeStyle = 'rgba(255,255,255,.07)'; ctx.setLineDash([4, 6]);
+      ctx.beginPath(); ctx.moveTo(WALL, y); ctx.lineTo(W - WALL, y); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(214,211,209,.45)';
+      ctx.fillText(`${Math.round(-y / PX_PER_M)}m`, WALL + 4, y - 7);
+    }
+    if (S.maxH > 0.5) {
+      const by = -S.maxH * PX_PER_M;
+      ctx.strokeStyle = 'rgba(252,211,77,.35)';
+      ctx.beginPath(); ctx.moveTo(WALL, by); ctx.lineTo(W - WALL, by); ctx.stroke();
+    }
+  }
+
+  function drawFloor() {
+    ctx.fillStyle = '#21150f'; ctx.fillRect(0, 0, W, 400);
+    ctx.fillStyle = '#3a2618'; ctx.fillRect(0, 0, W, 6);
+  }
+
+  function drawBox(b) {
+    const t = BOX_TYPES[b.plugin.kind];
+    const sticky = S.abilities.sticky > 0 && b.plugin.kind !== 'anchor';
+    ctx.save();
+    ctx.translate(b.position.x, b.position.y); ctx.rotate(b.angle);
+    const w = b.plugin.w, h = b.plugin.h;
+    roundRect(-w / 2, -h / 2, w, h, 3);
+    ctx.fillStyle = t.fill; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = sticky ? '#4ade80' : t.edge; ctx.stroke();
+    ctx.globalAlpha = 0.35; ctx.strokeStyle = t.edge; ctx.lineWidth = 1.5;
+    if (b.plugin.kind === 'normal') {
+      ctx.beginPath(); ctx.moveTo(-w / 2 + 4, -h / 2 + 4); ctx.lineTo(w / 2 - 4, h / 2 - 4);
+      ctx.moveTo(w / 2 - 4, -h / 2 + 4); ctx.lineTo(-w / 2 + 4, h / 2 - 4); ctx.stroke();
+    } else if (b.plugin.kind === 'plank') {
+      ctx.beginPath(); ctx.moveTo(-w / 2 + 4, 0); ctx.lineTo(w / 2 - 4, 0); ctx.stroke();
+    } else if (b.plugin.kind === 'heavy') {
+      ctx.globalAlpha = 0.7; ctx.fillStyle = t.edge;
+      for (const [x, y] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.beginPath(); ctx.arc(x * (w / 2 - 7), y * (h / 2 - 7), 2, 0, Math.PI * 2); ctx.fill(); }
+    } else if (b.plugin.kind === 'anchor') {
+      ctx.globalAlpha = 0.8; ctx.fillStyle = '#facc15';
+      for (let x = -w / 2 + 6; x < w / 2 - 6; x += 16) { ctx.beginPath(); ctx.moveTo(x, h / 2 - 3); ctx.lineTo(x + 8, -h / 2 + 3); ctx.lineTo(x + 14, -h / 2 + 3); ctx.lineTo(x + 6, h / 2 - 3); ctx.fill(); }
+      if (b.isStatic) { ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.strokeStyle = '#fde047'; roundRect(-w / 2 - 2, -h / 2 - 2, w + 4, h + 4, 4); ctx.stroke(); }
+    }
+    if (sticky) { ctx.globalAlpha = 0.18; ctx.fillStyle = '#4ade80'; roundRect(-w / 2, -h / 2, w, h, 3); ctx.fill(); }
+    ctx.restore();
+  }
+
+  function drawPlatforms(t) {
+    const top = S.camY - 80, bottom = S.camY + H + 80;
+    for (const b of platforms) {
+      if (b.position.y < top || b.position.y > bottom || b.plugin.kind !== 'anchorBlock') continue;
+      const { w, h } = b.plugin;
+      ctx.save(); ctx.translate(b.position.x, b.position.y);
+      roundRect(-w / 2, -h / 2, w, h, 3);
+      ctx.fillStyle = '#3f4a5a'; ctx.fill();
+      ctx.save(); ctx.clip();
+      ctx.fillStyle = 'rgba(250,204,21,.75)';
+      for (let x = -w / 2 - 10; x < w / 2; x += 14) { ctx.beginPath(); ctx.moveTo(x, h / 2); ctx.lineTo(x + 8, -h / 2); ctx.lineTo(x + 13, -h / 2); ctx.lineTo(x + 5, h / 2); ctx.fill(); }
+      ctx.restore();
+      ctx.lineWidth = 2; ctx.strokeStyle = '#facc15'; roundRect(-w / 2, -h / 2, w, h, 3); ctx.stroke();
+      ctx.fillStyle = '#94a3b8';
+      for (const sx of [-w / 2 + 6, w / 2 - 6]) { ctx.beginPath(); ctx.arc(sx, 0, 2.2, 0, Math.PI * 2); ctx.fill(); }
+      ctx.restore();
+    }
+
+    for (const r of rests) {
+      if (r.y < top || r.y > bottom) continue;
+      const x0 = r.x - SHELF_W / 2, y0 = r.y - SHELF_H / 2;
+      // lamp glow
+      const lampX = r.x - r.side * 40, lampY = y0 - 70;
+      const glow = ctx.createRadialGradient(lampX, lampY, 4, lampX, lampY, 110);
+      glow.addColorStop(0, r.reached ? 'rgba(110,231,183,.28)' : 'rgba(253,224,71,.22)');
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow; ctx.fillRect(lampX - 110, lampY - 110, 220, 220);
+      // shelf
+      ctx.fillStyle = '#4a3428'; ctx.fillRect(x0, y0, SHELF_W, SHELF_H);
+      ctx.fillStyle = r.reached ? '#34d399' : '#a16207'; ctx.fillRect(x0, y0, SHELF_W, 4);
+      ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 1;
+      for (let x = x0 + 26; x < x0 + SHELF_W; x += 26) { ctx.beginPath(); ctx.moveTo(x, y0 + 5); ctx.lineTo(x, y0 + SHELF_H); ctx.stroke(); }
+      // lamp post
+      ctx.strokeStyle = '#78716c'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(lampX, y0); ctx.lineTo(lampX, lampY); ctx.stroke();
+      ctx.fillStyle = r.reached ? '#6ee7b7' : '#fde047';
+      ctx.beginPath(); ctx.arc(lampX, lampY, 5, 0, Math.PI * 2); ctx.fill();
+      // sign
+      const signX = r.x - r.side * 78;
+      ctx.fillStyle = '#292524'; roundRect(signX - 30, y0 - 34, 60, 22, 4); ctx.fill();
+      ctx.strokeStyle = r.reached ? '#34d399' : '#a8a29e'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = r.reached ? '#6ee7b7' : '#e7e5e4';
+      ctx.font = '700 11px "Noto Sans KR", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(`쉼터 ${r.meters}m`, signX, y0 - 23);
+      ctx.fillStyle = '#57534e'; ctx.fillRect(signX - 1, y0 - 12, 2, 12);
+      // vending machine
+      const v = r.vend, vx = v.x - v.w / 2, vy = v.y - v.h / 2;
+      ctx.fillStyle = v.used ? '#334155' : '#0369a1'; roundRect(vx, vy, v.w, v.h, 4); ctx.fill();
+      ctx.strokeStyle = v.used ? '#475569' : '#7dd3fc'; ctx.lineWidth = 1.5; ctx.stroke();
+      const pulse = v.used ? 0.25 : 0.7 + 0.3 * Math.sin(t * 0.006);
+      ctx.fillStyle = `rgba(125,211,252,${pulse})`; ctx.fillRect(vx + 5, vy + 6, v.w - 10, 18);
+      ctx.fillStyle = v.used ? '#64748b' : '#ef4444';
+      ctx.fillRect(v.x - 2, vy + 9, 4, 12); ctx.fillRect(v.x - 6, vy + 13, 12, 4);
+      ctx.fillStyle = '#0c4a6e'; ctx.fillRect(vx + 6, vy + v.h - 14, v.w - 12, 7);
+      ctx.fillStyle = v.used ? '#94a3b8' : '#e0f2fe';
+      ctx.font = '700 9px "Noto Sans KR", sans-serif';
+      ctx.fillText(v.used ? '품절' : '회복', v.x, vy + 33);
+      ctx.textAlign = 'start';
+    }
+  }
+
+  function drawPlayer(t) {
+    const p = player.position;
+    if (S.invuln > 0 && Math.floor(t / 90) % 2 === 0) return;
+    ctx.save(); ctx.translate(p.x, p.y);
+    if (S.abilities.superjump > 0) { ctx.shadowColor = '#f472b6'; ctx.shadowBlur = 16; }
+    roundRect(-13, -19, 26, 38, 7);
+    ctx.fillStyle = '#e7e5e4'; ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ea580c'; roundRect(-13, -19, 26, 11, 6); ctx.fill();
+    const look = Math.max(-3, Math.min(3, player.velocity.x));
+    const blink = Math.sin(t * 0.003) > 0.97 ? 0.5 : 3;
+    ctx.fillStyle = '#1c1917';
+    ctx.fillRect(-7 + look, -4, 3.5, blink); ctx.fillRect(3.5 + look, -4, 3.5, blink);
+    ctx.restore();
+  }
+
+  function drawGhost() {
+    if (!S.running || S.over || S.inventory.length === 0) return;
+    const kind = S.inventory[0], t = BOX_TYPES[kind];
+    const pos = spawnPosition(kind, mouse.inside ? mouse.x : player.position.x);
+    ctx.save();
+    ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
+    ctx.strokeStyle = t.edge; ctx.globalAlpha = 0.6;
+    roundRect(pos.x - t.w / 2, pos.y - t.h / 2, t.w, t.h, 3); ctx.stroke();
+    ctx.globalAlpha = 0.12; ctx.fillStyle = t.fill; ctx.fill();
+    ctx.setLineDash([]); ctx.globalAlpha = 0.25;
+    ctx.beginPath(); ctx.moveTo(pos.x, pos.y + t.h / 2); ctx.lineTo(pos.x, pos.y + t.h / 2 + 30); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawLava(t) {
+    const y0 = S.lavaY;
+    const bottom = S.camY + H + 40;
+    if (y0 > bottom) return;
+    const frozen = S.abilities.freeze > 0;
+    // glow
+    const glow = ctx.createLinearGradient(0, y0 - 140, 0, y0);
+    glow.addColorStop(0, 'rgba(249,115,22,0)');
+    glow.addColorStop(1, frozen ? 'rgba(56,189,248,.28)' : 'rgba(249,115,22,.38)');
+    ctx.fillStyle = glow; ctx.fillRect(0, y0 - 140, W, 140);
+    // body
+    const g = ctx.createLinearGradient(0, y0, 0, y0 + 220);
+    if (frozen) { g.addColorStop(0, '#7dd3fc'); g.addColorStop(0.15, '#0ea5e9'); g.addColorStop(1, '#0c4a6e'); }
+    else { g.addColorStop(0, '#fde047'); g.addColorStop(0.08, '#f97316'); g.addColorStop(0.4, '#dc2626'); g.addColorStop(1, '#450a0a'); }
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(0, bottom);
+    const speed = frozen ? 0 : 1;
+    for (let x = 0; x <= W; x += 12) {
+      const wy = y0 + Math.sin(x * 0.03 + t * 0.003 * speed) * 4 + Math.sin(x * 0.07 - t * 0.005 * speed) * 2.5;
+      ctx.lineTo(x, wy);
+    }
+    ctx.lineTo(W, bottom); ctx.closePath(); ctx.fill();
+    // bubbles
+    if (!frozen) {
+      for (let i = 0; i < 9; i++) {
+        const bx = (i * 61 + t * 0.02 * (i % 3 + 1)) % W;
+        const ph = (t * 0.002 + i * 1.7) % 3;
+        if (ph < 1) {
+          ctx.fillStyle = `rgba(254,240,138,${0.7 * (1 - ph)})`;
+          ctx.beginPath(); ctx.arc(bx, y0 + 6 - ph * 8, 2 + ph * 3, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+  }
+
+  function drawParticles(dt) {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.life -= dt; if (p.life <= 0) { particles.splice(i, 1); continue; }
+      p.vy += 0.12; p.x += p.vx; p.y += p.vy;
+      ctx.globalAlpha = Math.min(1, p.life * 2);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function render(t, dt) {
+    ctx.save();
+    if (S.shake > 0) { ctx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake); S.shake *= 0.9; if (S.shake < 0.3) S.shake = 0; }
+    drawBackground(t);
+    ctx.save();
+    ctx.translate(0, -S.camY);
+    drawWalls();
+    drawFloor();
+    drawPlatforms(t);
+    for (const b of boxes) drawBox(b);
+    drawGhost();
+    if (!S.over) drawPlayer(t);
+    drawParticles(dt);
+    drawLava(t);
+    ctx.restore();
+
+    // danger vignette
+    const dist = S.lavaY - player.bounds.max.y;
+    if (S.running && !S.over && dist < 160) {
+      const a = (1 - dist / 160) * (0.35 + 0.15 * Math.sin(t * 0.012));
+      const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.75);
+      v.addColorStop(0, 'rgba(220,38,38,0)'); v.addColorStop(1, `rgba(220,38,38,${a})`);
+      ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+    }
+    if (S.abilities.freeze > 0) { ctx.fillStyle = 'rgba(56,189,248,.06)'; ctx.fillRect(0, 0, W, H); }
+    ctx.restore();
+  }
+
+  // ---------- Loop ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    update(dt);
+    render(now, dt);
+    updateHud();
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- Input ----------
+  const KEYMAP = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', Space: 'jump', ArrowUp: 'jump', KeyW: 'jump' };
+  window.addEventListener('keydown', (e) => {
+    if (!S.running || S.over) {
+      if ((e.code === 'Enter' || e.code === 'Space') && !ui.screen.classList.contains('hidden')) { e.preventDefault(); startGame(); }
+      return;
+    }
+    if (KEYMAP[e.code]) { input[KEYMAP[e.code]] = true; e.preventDefault(); return; }
+    if (e.code === 'KeyE' || e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); dropBox(mouse.inside ? mouse.x : undefined); }
+    else if (e.code === 'KeyQ') openQuiz(true);
+    else if (/^Digit[1-4]$/.test(e.code) || /^Numpad[1-4]$/.test(e.code)) {
+      if (S.quiz) answerQuiz(Number(e.code.slice(-1)) - 1);
+    }
+  });
+  window.addEventListener('keyup', (e) => { if (KEYMAP[e.code]) input[KEYMAP[e.code]] = false; });
+  window.addEventListener('blur', () => { input.left = input.right = input.jump = false; });
+
+  function canvasX(clientX) { const r = canvas.getBoundingClientRect(); return ((clientX - r.left) / r.width) * W; }
+  canvas.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') { mouse.inside = true; mouse.x = canvasX(e.clientX); } });
+  canvas.addEventListener('pointerleave', () => { mouse.inside = false; });
+  canvas.addEventListener('pointerdown', (e) => { if (S.running && !S.over) dropBox(canvasX(e.clientX)); });
+
+  ui.request.addEventListener('click', () => openQuiz(true));
+  ui.drop.addEventListener('click', () => dropBox());
+  ui.startBtn.addEventListener('click', startGame);
+
+  document.querySelectorAll('.pad-btn').forEach((btn) => {
+    const k = btn.dataset.key;
+    const on = (e) => { e.preventDefault(); input[k] = true; };
+    const off = (e) => { e.preventDefault(); input[k] = false; };
+    btn.addEventListener('pointerdown', on);
+    btn.addEventListener('pointerup', off);
+    btn.addEventListener('pointercancel', off);
+    btn.addEventListener('pointerleave', off);
+  });
+
+  // ---------- Boot ----------
+  resetState();
+  buildWorld();
+  renderInventory();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
