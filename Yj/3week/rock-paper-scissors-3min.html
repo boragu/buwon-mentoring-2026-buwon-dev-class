@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3분 가위바위보</title>
+<style>
+:root{color-scheme:light;--ink:#25283b;--muted:#73778a;--purple:#7558e8;--panel:#fff;--bg:#f5f3ff}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px;background:radial-gradient(circle at 10% 15%,#ffe8f0 0,transparent 28%),radial-gradient(circle at 90% 85%,#e5e0ff 0,transparent 30%),var(--bg);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink)}
+main{width:min(100%,620px);background:var(--panel);border-radius:28px;padding:clamp(24px,6vw,48px);text-align:center;box-shadow:0 22px 70px #4b37851a;border:1px solid #fff}
+h1{font-size:clamp(2rem,6vw,3rem);margin:0 0 6px;letter-spacing:-.05em}
+.sub{color:var(--muted);margin:0 0 26px}
+.top{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;margin-bottom:24px}
+.pill{background:#f6f4ff;border-radius:16px;padding:12px 22px;min-width:132px}
+.label{display:block;color:var(--muted);font-size:.83rem}
+.value{display:block;font-size:1.8rem;font-weight:800;font-variant-numeric:tabular-nums}
+.score .value{color:var(--purple)}
+.arena{display:flex;justify-content:center;align-items:center;gap:clamp(20px,8vw,70px);margin:18px 0 14px}
+.hand{font-size:clamp(4.5rem,18vw,7rem);line-height:1.2;filter:drop-shadow(0 8px 8px #34304c18)}
+.versus{font-weight:900;color:#b7b4c7;font-size:1rem}
+.caption{color:var(--muted);font-size:.85rem}
+.result{min-height:2.2em;margin:12px 0 22px;font-weight:750;font-size:1.25rem}
+.buttons{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
+.move{border:0;border-radius:18px;background:linear-gradient(145deg,#8369f3,#674ad9);color:white;padding:14px 22px;font:inherit;font-weight:750;cursor:pointer;box-shadow:0 7px 16px #7558e83b;transition:transform .15s,filter .15s}
+.move:hover:not(:disabled){transform:translateY(-3px);filter:brightness(1.05)}
+.move:active:not(:disabled){transform:translateY(0)}
+.move:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+.camera{margin:26px auto 0;padding:18px;background:#faf9ff;border:1px solid #eeeafa;border-radius:20px}
+.camera h2{font-size:1.05rem;margin:0 0 8px}
+.camera p{margin:6px 0 12px;color:var(--muted);font-size:.86rem}
+.cam-actions{display:flex;justify-content:center;gap:9px;flex-wrap:wrap}
+.cam-button{border:1px solid #dcd6f5;background:white;color:#51427d;border-radius:12px;padding:10px 14px;font:inherit;font-weight:700;cursor:pointer}
+.cam-button.primary{background:#7558e8;color:#fff;border-color:#7558e8}
+.cam-button:disabled{opacity:.45;cursor:not-allowed}
+#webcam-container canvas{display:block;width:min(100%,280px);height:auto;border-radius:16px;margin:12px auto 0}
+#label-container{margin:8px 0;color:#51427d;font-weight:700;min-height:1.3em}
+.note{margin:22px 0 0;color:var(--muted);font-size:.88rem}
+.reset{display:none;margin:18px auto 0;border:1px solid #ddd8f5;background:#fff;color:#51427d;border-radius:12px;padding:10px 18px;font:inherit;font-weight:700;cursor:pointer}
+.done .reset{display:block}
+.done .buttons{opacity:.55}
+@media(max-width:420px){main{padding:25px 18px}.pill{min-width:120px;padding:10px 16px}.move{padding:13px 17px}}
+</style>
+</head>
+<body>
+<main id="game" aria-live="polite">
+  <h1>가위바위보</h1>
+  <p class="sub">3분 동안 컴퓨터와 대결해 보세요!</p>
+
+  <div class="top">
+    <div class="pill">
+      <span class="label">남은 시간</span>
+      <span class="value" id="time">03:00</span>
+    </div>
+    <div class="pill score">
+      <span class="label">내 점수</span>
+      <span class="value" id="score">0</span>
+    </div>
+  </div>
+
+  <div class="arena" aria-label="대결 결과">
+    <div>
+      <div class="hand" id="playerHand">✊</div>
+      <div class="caption">나</div>
+    </div>
+    <div class="versus">VS</div>
+    <div>
+      <div class="hand" id="computerHand">✊</div>
+      <div class="caption">컴퓨터</div>
+    </div>
+  </div>
+
+  <div class="result" id="result">무엇을 낼지 골라주세요!</div>
+
+  <div class="buttons">
+    <button class="move" data-move="가위">✌️ 가위</button>
+    <button class="move" data-move="바위">✊ 바위</button>
+    <button class="move" data-move="보">✋ 보</button>
+  </div>
+
+  <section class="camera">
+    <h2>웹캠으로 손모양 내기</h2>
+    <p>같은 폴더에 있는 Teachable Machine 모델로 손모양을 인식합니다.</p>
+    <div class="cam-actions">
+      <button class="cam-button" id="startCamera" type="button">카메라 시작</button>
+      <button class="cam-button primary" id="submitGesture" type="button" disabled>
+        인식한 손모양 내기
+      </button>
+    </div>
+    <div id="webcam-container"></div>
+    <div id="label-container" aria-live="polite">카메라를 시작하면 인식 결과가 표시됩니다.</div>
+  </section>
+
+  <p class="note">이기면 +1점 · 지면 −1점 · 비기면 점수 그대로</p>
+  <button class="reset" id="reset">다시 시작</button>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+<script>
+(() => {
+  const icons = {가위:"✌️", 바위:"✊", 보:"✋"};
+  const moves = Object.keys(icons);
+
+  let score = 0;
+  let seconds = 180;
+  let active = true;
+  let timer;
+  let model;
+  let webcam;
+  let currentGesture = null;
+  let cameraBusy = false;
+
+  const MODEL_URL = "./";
+  const timeEl = document.getElementById("time");
+  const scoreEl = document.getElementById("score");
+  const resultEl = document.getElementById("result");
+  const playerHand = document.getElementById("playerHand");
+  const computerHand = document.getElementById("computerHand");
+  const game = document.getElementById("game");
+  const buttons = [...document.querySelectorAll(".move")];
+  const labelEl = document.getElementById("label-container");
+  const submitGesture = document.getElementById("submitGesture");
+
+  function drawTime() {
+    const minutes = String(Math.floor(seconds / 60)).padStart(2, "0");
+    const remainingSeconds = String(seconds % 60).padStart(2, "0");
+    timeEl.textContent = `${minutes}:${remainingSeconds}`;
+  }
+
+  function finish() {
+    active = false;
+    clearInterval(timer);
+    buttons.forEach(button => button.disabled = true);
+    submitGesture.disabled = true;
+    game.classList.add("done");
+    resultEl.textContent = `시간 종료! 최종 점수는 ${score}점입니다.`;
+  }
+
+  function play(player) {
+    if (!active) return;
+
+    const computer = moves[Math.floor(Math.random() * moves.length)];
+    playerHand.textContent = icons[player];
+    computerHand.textContent = icons[computer];
+
+    if (player === computer) {
+      resultEl.textContent = "비겼어요! 점수는 그대로예요.";
+    } else if (
+      (player === "가위" && computer === "보") ||
+      (player === "바위" && computer === "가위") ||
+      (player === "보" && computer === "바위")
+    ) {
+      score++;
+      resultEl.textContent = "이겼어요! +1점";
+    } else {
+      score--;
+      resultEl.textContent = "졌어요! −1점";
+    }
+
+    scoreEl.textContent = score;
+  }
+
+  function normalizeLabel(label) {
+    const value = label.toLowerCase().replace(/[\s_-]/g, "");
+
+    if (value.includes("가위") || value.includes("scissor")) return "가위";
+    if (value.includes("바위") || value.includes("주먹") || value.includes("rock")) return "바위";
+    if (value.includes("보") || value.includes("paper")) return "보";
+
+    return null;
+  }
+
+  async function startCamera() {
+    if (cameraBusy || webcam) return;
+
+    cameraBusy = true;
+    const startButton = document.getElementById("startCamera");
+    startButton.disabled = true;
+    labelEl.textContent = "모델을 불러오는 중…";
+
+    try {
+      model = await tmImage.load(
+        MODEL_URL + "model.json",
+        MODEL_URL + "metadata.json"
+      );
+
+      webcam = new tmImage.Webcam(280, 280, true);
+      await webcam.setup();
+      await webcam.play();
+
+      document.getElementById("webcam-container").appendChild(webcam.canvas);
+      labelEl.textContent = "손모양을 카메라에 보여주세요.";
+      window.requestAnimationFrame(cameraLoop);
+    } catch (error) {
+      model = null;
+      startButton.disabled = false;
+      labelEl.textContent =
+        "모델을 불러오거나 카메라를 시작하지 못했어요. 같은 폴더의 model.json, metadata.json, weights.bin과 카메라 권한을 확인해 주세요.";
+      console.error(error);
+    } finally {
+      cameraBusy = false;
+    }
+  }
+
+  async function cameraLoop() {
+    if (!webcam) return;
+
+    webcam.update();
+    const predictions = await model.predict(webcam.canvas);
+    const best = predictions.reduce((previous, current) =>
+      current.probability > previous.probability ? current : previous
+    );
+
+    currentGesture = best.probability >= 0.75
+      ? normalizeLabel(best.className)
+      : null;
+
+    labelEl.textContent = currentGesture
+      ? `인식: ${currentGesture} (${Math.round(best.probability * 100)}%)`
+      : `인식 중… (${best.className} ${Math.round(best.probability * 100)}%)`;
+
+    submitGesture.disabled = !active || !currentGesture;
+    window.requestAnimationFrame(cameraLoop);
+  }
+
+  document.getElementById("startCamera").addEventListener("click", startCamera);
+
+  submitGesture.addEventListener("click", () => {
+    if (active && currentGesture) play(currentGesture);
+  });
+
+  buttons.forEach(button => {
+    button.addEventListener("click", () => play(button.dataset.move));
+  });
+
+  document.addEventListener("keydown", event => {
+    if (!active || event.repeat) return;
+
+    const keyMap = {"1":"가위", "2":"바위", "3":"보"};
+    if (keyMap[event.key]) play(keyMap[event.key]);
+  });
+
+  document.getElementById("reset").addEventListener("click", () => {
+    score = 0;
+    seconds = 180;
+    active = true;
+
+    scoreEl.textContent = score;
+    drawTime();
+    playerHand.textContent = "✊";
+    computerHand.textContent = "✊";
+    resultEl.textContent = "무엇을 낼지 골라주세요!";
+    game.classList.remove("done");
+    buttons.forEach(button => button.disabled = false);
+
+    clearInterval(timer);
+    timer = setInterval(() => {
+      seconds--;
+      drawTime();
+      if (seconds <= 0) finish();
+    }, 1000);
+  });
+
+  drawTime();
+  timer = setInterval(() => {
+    seconds--;
+    drawTime();
+    if (seconds <= 0) finish();
+  }, 1000);
+})();
+</script>
+</body>
+</html>
