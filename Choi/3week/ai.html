@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 가위바위보 대결 (Teachable Machine)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Font: Noto Sans KR & Outfit -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700;900&family=Outfit:wght@500;700;900&display=swap" rel="stylesheet">
+    <!-- Canvas Confetti for Win Effect -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <!-- TensorFlow.js and Teachable Machine Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            900: '#312e81',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Noto Sans KR', 'sans-serif'],
+                        display: ['Outfit', 'Noto Sans KR', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Mirrored webcam video view */
+        .mirror-video video, .mirror-canvas canvas {
+            transform: scaleX(-1);
+            border-radius: 1rem;
+            object-fit: cover;
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        /* Pulse glow for fight button */
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 20px rgba(99, 102, 241, 0.6); transform: scale(1); }
+            50% { box-shadow: 0 0 35px rgba(99, 102, 241, 0.9); transform: scale(1.02); }
+        }
+        .pulse-btn {
+            animation: pulse-glow 2s infinite ease-in-out;
+        }
+
+        /* Shake animation for computer choice reveal */
+        @keyframes shake {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            20% { transform: translateY(-10px) rotate(-5deg); }
+            40% { transform: translateY(10px) rotate(5deg); }
+            60% { transform: translateY(-10px) rotate(-5deg); }
+            80% { transform: translateY(10px) rotate(5deg); }
+        }
+        .shake-anim {
+            animation: shake 0.5s ease-in-out;
+        }
+
+        /* Countdown overlay animation */
+        @keyframes pop-in {
+            0% { transform: scale(0.3); opacity: 0; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .pop-animation {
+            animation: pop-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e1b4b;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4f46e5;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col justify-between selection:bg-brand-500 selection:text-white">
+
+    <!-- Header Section -->
+    <header class="w-full border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-40 px-4 py-3">
+        <div class="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-400 flex items-center justify-center text-white shadow-lg shadow-brand-500/30">
+                    <i class="fa-solid font-black fa-hand-scissors text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold font-display tracking-tight bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">
+                        AI 가위바위보 대결
+                    </h1>
+                    <p class="text-xs text-slate-400">Google Teachable Machine 연동 AI 게임</p>
+                </div>
+            </div>
+
+            <!-- Model Status & Control Controls -->
+            <div class="flex items-center gap-3">
+                <div id="model-status" class="flex items-center gap-2 bg-slate-800/90 border border-slate-700/80 px-3 py-1.5 rounded-full text-xs font-medium text-slate-300">
+                    <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" id="status-dot"></span>
+                    <span id="status-text">모델 연결 준비 중</span>
+                </div>
+                <button id="sound-toggle-btn" onclick="toggleSound()" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700 transition" title="소리 켜기/끄기">
+                    <i class="fa-solid fa-volume-high" id="sound-icon"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-6xl w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 flex-grow">
+        
+        <!-- Left Panel: Webcam Feed & AI Recognition (lg:col-span-5) -->
+        <section class="lg:col-span-5 flex flex-col gap-4">
+            <!-- Camera Card -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col relative overflow-hidden">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="font-bold text-slate-200 flex items-center gap-2 text-sm">
+                        <i class="fa-solid fa-video text-brand-500"></i> 내 카메라 (실시간 인식)
+                    </h2>
+                    <span id="fps-counter" class="text-[11px] text-slate-500 font-mono">0 FPS</span>
+                </div>
+
+                <!-- Video Viewport Box -->
+                <div class="relative w-full aspect-video bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center mirror-video shadow-inner">
+                    <!-- Webcam Container -->
+                    <div id="webcam-container" class="w-full h-full flex items-center justify-center"></div>
+
+                    <!-- Placeholder before camera starts -->
+                    <div id="webcam-placeholder" class="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-950/90 z-10">
+                        <div class="w-16 h-16 rounded-full bg-slate-800/80 border border-slate-700 flex items-center justify-center mb-3 text-indigo-400">
+                            <i class="fa-solid fa-camera text-2xl"></i>
+                        </div>
+                        <p class="text-sm font-semibold text-slate-300 mb-1">카메라가 비활성화되어 있습니다</p>
+                        <p class="text-xs text-slate-500 max-w-xs mb-4">아래 버튼을 눌러 카메라 권한을 허용하고 AI 인식을 시작하세요.</p>
+                        <button onclick="initWebcam()" class="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-semibold rounded-xl text-xs transition shadow-lg shadow-brand-600/30 flex items-center gap-2">
+                            <i class="fa-solid fa-power-off"></i> 웹캠 & AI 모델 시작
+                        </button>
+                    </div>
+
+                    <!-- Countdown Display Layer -->
+                    <div id="countdown-overlay" class="absolute inset-0 bg-slate-950/70 backdrop-blur-sm flex flex-col items-center justify-center z-20 hidden">
+                        <span id="countdown-number" class="text-7xl font-black font-display text-amber-400 drop-shadow-[0_0_20px_rgba(251,191,36,0.6)]">3</span>
+                        <p id="countdown-subtext" class="text-lg font-bold text-white mt-2">가위... 바위...</p>
+                    </div>
+                </div>
+
+                <!-- Controls under camera -->
+                <div class="mt-4 flex gap-2">
+                    <button id="toggle-cam-btn" onclick="toggleWebcam()" disabled class="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-300 text-xs font-medium rounded-lg border border-slate-700 transition flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-video-slash"></i> 카메라 정지
+                    </button>
+                    <button onclick="toggleManualMode()" class="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg border border-slate-700 transition flex items-center justify-center gap-1.5" title="카메라 없이 수동 테스트">
+                        <i class="fa-solid fa-gamepad text-indigo-400"></i> 수동 테스트 모드
+                    </button>
+                </div>
+            </div>
+
+            <!-- AI Detection Probabilities Card -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="font-bold text-slate-200 text-xs flex items-center gap-2">
+                        <i class="fa-solid fa-chart-bar text-indigo-400"></i> AI 손 모양 인식 감도
+                    </h3>
+                    <span id="active-gesture-badge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-800 text-slate-400">
+                        대기 중
+                    </span>
+                </div>
+
+                <div id="label-container" class="space-y-2.5">
+                    <!-- Dynamic Progress bars for model classes will be injected here -->
+                    <div class="text-xs text-slate-500 text-center py-4">
+                        모델 로딩 시 클래스 정보가 여기에 표시됩니다.
+                    </div>
+                </div>
+
+                <!-- Recognized Model Labels Footer -->
+                <div class="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>모델 ID: <code class="text-indigo-300 font-mono">Pa5DGrc4r</code></span>
+                    <span id="detected-classes-list">클래스 확인 중...</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Panel: Game Battle Arena & Scoreboard (lg:col-span-7) -->
+        <section class="lg:col-span-7 flex flex-col gap-4">
+            
+            <!-- Score Dashboard -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl grid grid-cols-3 gap-3 text-center">
+                <!-- User Score -->
+                <div class="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-center">
+                    <span class="text-xs font-medium text-slate-400">나 (플레이어)</span>
+                    <span id="user-score" class="text-3xl font-black font-display text-indigo-400 my-1">0</span>
+                    <span class="text-[10px] text-slate-500">+10점 / 승리</span>
+                </div>
+                <!-- Win Streak / Draw Count -->
+                <div class="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-center">
+                    <span class="text-xs font-medium text-slate-400">현재 연승</span>
+                    <span id="win-streak" class="text-3xl font-black font-display text-amber-400 my-1">0 🔥</span>
+                    <span class="text-[10px] text-slate-500" id="max-streak-label">최고 연승: 0</span>
+                </div>
+                <!-- Computer Score -->
+                <div class="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-center">
+                    <span class="text-xs font-medium text-slate-400">AI 컴퓨터</span>
+                    <span id="com-score" class="text-3xl font-black font-display text-rose-400 my-1">0</span>
+                    <span class="text-[10px] text-slate-500">+10점 / 패배시</span>
+                </div>
+            </div>
+
+            <!-- Main Battle Arena Box -->
+            <div class="bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-800 rounded-2xl p-6 shadow-2xl flex flex-col items-center justify-between relative overflow-hidden min-h-[300px]">
+                <!-- Ambient Background Glow -->
+                <div class="absolute -top-24 -left-24 w-48 h-48 bg-brand-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="absolute -bottom-24 -right-24 w-48 h-48 bg-rose-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                <!-- Match Banner Message -->
+                <div id="match-banner" class="w-full text-center py-2 px-4 rounded-xl bg-slate-800/60 border border-slate-700/50 mb-4 transition-all duration-300">
+                    <p id="banner-text" class="text-sm font-bold text-indigo-300">
+                        준비가 되면 '대결 시작!' 버튼을 눌러주세요! ✊✌️✋
+                    </p>
+                </div>
+
+                <!-- Face Off Hands Display -->
+                <div class="w-full grid grid-cols-11 items-center gap-2 my-auto">
+                    <!-- User Hand Showcase (4 Cols) -->
+                    <div class="col-span-5 flex flex-col items-center">
+                        <div class="w-24 h-24 md:w-32 md:h-32 rounded-2xl bg-slate-800/90 border-2 border-indigo-500/40 flex flex-col items-center justify-center shadow-lg relative group" id="user-hand-box">
+                            <span id="user-hand-emoji" class="text-5xl md:text-6xl transition-transform duration-300">❓</span>
+                            <span class="text-[11px] font-bold text-indigo-300 mt-1" id="user-hand-label">내 선택</span>
+                        </div>
+                        <span class="text-xs text-slate-400 font-medium mt-2">나 (AI 인식)</span>
+                    </div>
+
+                    <!-- VS Badge Center (1 Col) -->
+                    <div class="col-span-1 flex flex-col items-center justify-center">
+                        <span class="text-xl md:text-2xl font-black font-display text-slate-600 tracking-wider">VS</span>
+                    </div>
+
+                    <!-- AI Hand Showcase (4 Cols) -->
+                    <div class="col-span-5 flex flex-col items-center">
+                        <div class="w-24 h-24 md:w-32 md:h-32 rounded-2xl bg-slate-800/90 border-2 border-rose-500/40 flex flex-col items-center justify-center shadow-lg relative" id="com-hand-box">
+                            <span id="com-hand-emoji" class="text-5xl md:text-6xl transition-transform duration-300">🤖</span>
+                            <span class="text-[11px] font-bold text-rose-300 mt-1" id="com-hand-label">AI 선택</span>
+                        </div>
+                        <span class="text-xs text-slate-400 font-medium mt-2">AI 컴퓨터</span>
+                    </div>
+                </div>
+
+                <!-- Manual Selection Panel (Shown during manual mode or camera failure) -->
+                <div id="manual-controls" class="w-full mt-4 p-3 bg-slate-800/50 border border-slate-700/60 rounded-xl hidden">
+                    <p class="text-xs text-slate-400 text-center mb-2 font-medium">수동 선택 (웹캠 미사용시 사용):</p>
+                    <div class="flex justify-center gap-3">
+                        <button onclick="setManualHand('rock')" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 active:bg-brand-600 rounded-lg text-sm font-bold text-slate-200 transition">
+                            ✊ 바위
+                        </button>
+                        <button onclick="setManualHand('scissors')" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 active:bg-brand-600 rounded-lg text-sm font-bold text-slate-200 transition">
+                            ✌️ 가위
+                        </button>
+                        <button onclick="setManualHand('paper')" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 active:bg-brand-600 rounded-lg text-sm font-bold text-slate-200 transition">
+                            ✋ 보
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Big Action Fight Button -->
+                <div class="w-full mt-6 flex flex-col items-center">
+                    <button id="start-round-btn" onclick="startRound()" class="w-full max-w-sm py-4 px-6 bg-gradient-to-r from-brand-600 via-indigo-600 to-brand-700 hover:from-brand-500 hover:to-indigo-500 text-white font-black text-lg rounded-xl shadow-xl transition-all duration-200 active:scale-95 flex items-center justify-center gap-3 pulse-btn">
+                        <i class="fa-solid fa-swords text-xl"></i>
+                        <span>대결 시작! (Play Round)</span>
+                    </button>
+                    <span class="text-[11px] text-slate-500 mt-2">스페이스바(Space)를 눌러 빠르게 대결을 시작할 수 있습니다.</span>
+                </div>
+            </div>
+
+            <!-- Bottom Row: Game Controls & History Log -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col gap-3">
+                <div class="flex items-center justify-between">
+                    <h3 class="font-bold text-slate-200 text-xs flex items-center gap-2">
+                        <i class="fa-solid fa-clock-rotate-left text-brand-500"></i> 최근 대결 기록
+                    </h3>
+                    <button onclick="resetScores()" class="text-xs text-rose-400 hover:text-rose-300 font-medium transition flex items-center gap-1">
+                        <i class="fa-solid fa-rotate-right"></i> 점수 초기화
+                    </button>
+                </div>
+
+                <!-- History Log List -->
+                <div id="history-list" class="max-h-36 overflow-y-auto space-y-1.5 pr-1 text-xs">
+                    <div class="text-slate-500 text-center py-3 italic">
+                        아직 진행된 대결이 없습니다.
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="w-full border-t border-slate-800 bg-slate-950 py-3 text-center text-xs text-slate-500">
+        <p>Google Teachable Machine Image Model Integration • Strictly Safe AI Assistant Web App</p>
+    </footer>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // ==========================================
+        // CONFIGURATION & GLOBAL STATE VARIABLES
+        // ==========================================
+        const MODEL_URL = "https://teachablemachine.withgoogle.com/models/Pa5DGrc4r/";
+        
+        let model, webcam, maxPredictions;
+        let isCamActive = false;
+        let isModelLoaded = false;
+        let isCountingDown = false;
+        let soundEnabled = true;
+
+        let userScore = 0;
+        let comScore = 0;
+        let currentStreak = 0;
+        let maxStreak = 0;
+        let matchCount = 0;
+
+        // Current real-time detected user hand state
+        let currentDetectedGesture = null; // 'rock', 'scissors', 'paper', or 'none'
+        let currentRawClassName = "";
+        let isManualMode = false;
+        let manualHand = 'rock';
+
+        // Mapping dictionary to normalize various model label naming conventions
+        const HAND_TYPES = {
+            ROCK: 'rock',
+            PAPER: 'paper',
+            SCISSORS: 'scissors',
+            NONE: 'none'
+        };
+
+        const HAND_DETAILS = {
+            'rock': { label: '바위', emoji: '✊', icon: 'fa-hand-back-fist' },
+            'scissors': { label: '가위', emoji: '✌️', icon: 'fa-hand-scissors' },
+            'paper': { label: '보', emoji: '✋', icon: 'fa-hand' },
+            'none': { label: '미인식', emoji: '❓', icon: 'fa-circle-question' }
+        };
+
+        // Web Audio API Sound Generator (No external MP3 files needed)
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playTone(freq, type = 'sine', duration = 0.15, gainVal = 0.1) {
+            if (!soundEnabled || !audioCtx) return;
+            try {
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(gainVal, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch (e) {
+                console.warn("Audio playback issue:", e);
+            }
+        }
+
+        function playSoundEffect(effectName) {
+            if (!soundEnabled) return;
+            switch(effectName) {
+                case 'tick':
+                    playTone(600, 'triangle', 0.08, 0.15);
+                    break;
+                case 'go':
+                    playTone(900, 'square', 0.25, 0.2);
+                    break;
+                case 'win':
+                    setTimeout(() => playTone(523.25, 'sine', 0.15, 0.2), 0);   // C5
+                    setTimeout(() => playTone(659.25, 'sine', 0.15, 0.2), 120); // E5
+                    setTimeout(() => playTone(783.99, 'sine', 0.3, 0.25), 240); // G5
+                    break;
+                case 'lose':
+                    setTimeout(() => playTone(400, 'sawtooth', 0.2, 0.15), 0);
+                    setTimeout(() => playTone(300, 'sawtooth', 0.3, 0.15), 180);
+                    break;
+                case 'draw':
+                    playTone(440, 'sine', 0.2, 0.15);
+                    break;
+            }
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            const icon = document.getElementById('sound-icon');
+            if (soundEnabled) {
+                icon.className = 'fa-solid fa-volume-high';
+                playTone(800, 'sine', 0.1, 0.1);
+            } else {
+                icon.className = 'fa-solid fa-volume-xmark text-slate-500';
+            }
+        }
+
+        // ==========================================
+        // INITIALIZATION & MODEL LOADING
+        // ==========================================
+        window.addEventListener('DOMContentLoaded', () => {
+            updateStatus('ready', '웹캠 시작을 기다리는 중');
+            setupKeyboardShortcuts();
+        });
+
+        function setupKeyboardShortcuts() {
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    if (!isCountingDown) {
+                        startRound();
+                    }
+                }
+            });
+        }
+
+        function updateStatus(state, message) {
+            const statusDot = document.getElementById('status-dot');
+            const statusText = document.getElementById('status-text');
+            statusText.innerText = message;
+
+            if (state === 'ready') {
+                statusDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
+            } else if (state === 'loading') {
+                statusDot.className = 'w-2.5 h-2.5 rounded-full bg-blue-400 animate-ping';
+            } else if (state === 'active') {
+                statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+            } else if (state === 'error') {
+                statusDot.className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
+            }
+        }
+
+        // Load Teachable Machine Model & Initialize Webcam
+        async function initWebcam() {
+            const placeholder = document.getElementById('webcam-placeholder');
+            updateStatus('loading', 'AI 모델 다운로드 중...');
+
+            try {
+                // 1. Load Model
+                const modelURL = MODEL_URL + "model.json";
+                const metadataURL = MODEL_URL + "metadata.json";
+
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+                isModelLoaded = true;
+
+                // Render dynamic class confidence bars
+                setupLabelContainer();
+
+                // Display class names loaded from metadata
+                const classLabels = model.getClassLabels();
+                document.getElementById('detected-classes-list').innerText = `감지 클래스: ${classLabels.join(', ')}`;
+
+                // 2. Setup Webcam Feed
+                updateStatus('loading', '웹캠 권한 요청 중...');
+                const flip = true; // mirror
+                webcam = new tmImage.Webcam(320, 240, flip);
+                
+                await webcam.setup(); // request webcam permission
+                await webcam.play();
+                
+                // Append canvas
+                const container = document.getElementById('webcam-container');
+                container.innerHTML = '';
+                container.appendChild(webcam.canvas);
+                
+                placeholder.classList.add('hidden');
+                isCamActive = true;
+                document.getElementById('toggle-cam-btn').disabled = false;
+                updateStatus('active', 'AI 웹캠 작동 중');
+
+                // Start prediction loop
+                window.requestAnimationFrame(loop);
+                
+            } catch (err) {
+                console.error("Webcam / Model Init Error:", err);
+                updateStatus('error', '카메라 연동 실패');
+                
+                let errorMsg = "카메라를 켤 수 없습니다. (권한 거부 또는 카메라 없음)";
+                if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                    errorMsg += " [웹캠은 HTTPS 환경에서 작동합니다]";
+                }
+                alert(errorMsg + "\n\n'수동 테스트 모드'를 활성화합니다.");
+                
+                // Fallback to manual mode automatically if camera fails
+                enableManualMode();
+            }
+        }
+
+        function setupLabelContainer() {
+            const container = document.getElementById('label-container');
+            container.innerHTML = '';
+
+            const classLabels = model.getClassLabels();
+            classLabels.forEach((label, idx) => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'space-y-1';
+                wrapper.innerHTML = `
+                    <div class="flex justify-between items-center text-xs font-medium">
+                        <span class="text-slate-300 font-semibold" id="class-label-${idx}">${label}</span>
+                        <span class="text-indigo-400 font-mono" id="class-percent-${idx}">0%</span>
+                    </div>
+                    <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                        <div id="class-bar-${idx}" class="h-full bg-slate-600 transition-all duration-150 rounded-full w-0"></div>
+                    </div>
+                `;
+                container.appendChild(wrapper);
+            });
+        }
+
+        // Main WebCam Frame Loop
+        let lastFrameTime = performance.now();
+        async function loop() {
+            if (isCamActive && webcam) {
+                webcam.update();
+                await predict();
+
+                // FPS Counter
+                const now = performance.now();
+                const fps = Math.round(1000 / (now - lastFrameTime));
+                lastFrameTime = now;
+                document.getElementById('fps-counter').innerText = `${fps} FPS`;
+
+                window.requestAnimationFrame(loop);
+            }
+        }
+
+        // Map recognized class string to normalized hand type
+        function normalizeClassLabel(className) {
+            const lower = className.toLowerCase().trim();
+
+            // Check Scissors
+            if (lower.includes('가위') || lower.includes('scissors') || lower.includes('scissor') || lower.includes('찌')) {
+                return HAND_TYPES.SCISSORS;
+            }
+            // Check Rock
+            if (lower.includes('바위') || lower.includes('주먹') || lower.includes('rock') || lower.includes('stone') || lower.includes('묵')) {
+                return HAND_TYPES.ROCK;
+            }
+            // Check Paper
+            if (lower.includes('보') || lower.includes('보자기') || lower.includes('paper') || lower.includes('빠')) {
+                return HAND_TYPES.PAPER;
+            }
+            // Background / Idle class
+            if (lower.includes('background') || lower.includes('bg') || lower.includes('배경') || lower.includes('없음') || lower.includes('idle')) {
+                return HAND_TYPES.NONE;
+            }
+            
+            // Fallback: If unknown label, try index mapping if label names are numeric or custom
+            return HAND_TYPES.NONE;
+        }
+
+        // Model Prediction
+        async function predict() {
+            if (!model || !webcam) return;
+            const prediction = await model.predict(webcam.canvas);
+
+            let maxProb = 0;
+            let highestClassIdx = -1;
+
+            for (let i = 0; i < maxPredictions; i++) {
+                const prob = prediction[i].probability;
+                const percent = Math.round(prob * 100);
+
+                // Update UI bar
+                const bar = document.getElementById(`class-bar-${i}`);
+                const percentText = document.getElementById(`class-percent-${i}`);
+                if (bar && percentText) {
+                    bar.style.width = `${percent}%`;
+                    percentText.innerText = `${percent}%`;
+
+                    if (prob > 0.6) {
+                        bar.className = "h-full bg-gradient-to-r from-brand-500 to-indigo-400 transition-all duration-150 rounded-full";
+                    } else {
+                        bar.className = "h-full bg-slate-700 transition-all duration-150 rounded-full";
+                    }
+                }
+
+                if (prob > maxProb) {
+                    maxProb = prob;
+                    highestClassIdx = i;
+                }
+            }
+
+            // Identify active gesture if confidence is sufficient (> 50%)
+            if (highestClassIdx !== -1 && maxProb >= 0.5) {
+                const rawLabel = prediction[highestClassIdx].className;
+                currentRawClassName = rawLabel;
+                const normalized = normalizeClassLabel(rawLabel);
+
+                if (normalized !== HAND_TYPES.NONE) {
+                    currentDetectedGesture = normalized;
+                } else {
+                    currentDetectedGesture = HAND_TYPES.NONE;
+                }
+
+                // Update UI badge
+                const badge = document.getElementById('active-gesture-badge');
+                if (currentDetectedGesture !== HAND_TYPES.NONE) {
+                    const info = HAND_DETAILS[currentDetectedGesture];
+                    badge.innerText = `${info.emoji} ${info.label} (${Math.round(maxProb * 100)}%)`;
+                    badge.className = "px-2 py-0.5 rounded text-[11px] font-bold bg-brand-500/20 text-indigo-300 border border-brand-500/30";
+                } else {
+                    badge.innerText = `대기/배경 (${Math.round(maxProb * 100)}%)`;
+                    badge.className = "px-2 py-0.5 rounded text-[11px] font-bold bg-slate-800 text-slate-400";
+                }
+            }
+        }
+
+        function toggleWebcam() {
+            if (isCamActive) {
+                isCamActive = false;
+                if (webcam) webcam.stop();
+                document.getElementById('webcam-placeholder').classList.remove('hidden');
+                document.getElementById('toggle-cam-btn').innerText = '카메라 다시 켜기';
+                updateStatus('ready', '카메라 일시 정지됨');
+            } else {
+                initWebcam();
+            }
+        }
+
+        function toggleManualMode() {
+            isManualMode = !isManualMode;
+            const manualControls = document.getElementById('manual-controls');
+            if (isManualMode) {
+                manualControls.classList.remove('hidden');
+                currentDetectedGesture = manualHand;
+                updateStatus('ready', '수동 테스트 모드 활성화');
+            } else {
+                manualControls.classList.add('hidden');
+                if (isCamActive) updateStatus('active', 'AI 웹캠 작동 중');
+            }
+        }
+
+        function enableManualMode() {
+            isManualMode = true;
+            document.getElementById('manual-controls').classList.remove('hidden');
+            document.getElementById('webcam-placeholder').classList.remove('hidden');
+            updateStatus('ready', '수동 모드로 전환됨');
+        }
+
+        function setManualHand(hand) {
+            manualHand = hand;
+            currentDetectedGesture = hand;
+            
+            // Visual highlight for buttons
+            const info = HAND_DETAILS[hand];
+            document.getElementById('banner-text').innerText = `수동 선택됨: ${info.emoji} ${info.label}`;
+            
+            // Update live preview box
+            document.getElementById('user-hand-emoji').innerText = info.emoji;
+            document.getElementById('user-hand-label').innerText = info.label;
+        }
+
+        // ==========================================
+        // GAME LOGIC & ROUND FLOW
+        // ==========================================
+        function startRound() {
+            if (isCountingDown) return;
+            isCountingDown = true;
+
+            const startBtn = document.getElementById('start-round-btn');
+            startBtn.disabled = true;
+            startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+            const countdownOverlay = document.getElementById('countdown-overlay');
+            const countdownNum = document.getElementById('countdown-number');
+            const countdownSub = document.getElementById('countdown-subtext');
+            const bannerText = document.getElementById('banner-text');
+
+            countdownOverlay.classList.remove('hidden');
+            bannerText.innerText = "대결 진행 중! 카메라에 손 모양을 보여주세요!";
+            
+            // Computer hand visual shuffle animation
+            const comEmoji = document.getElementById('com-hand-emoji');
+            const shuffleEmojis = ['✊', '✌️', '✋'];
+            let shuffleIdx = 0;
+            const shuffleInterval = setInterval(() => {
+                comEmoji.innerText = shuffleEmojis[shuffleIdx % 3];
+                shuffleIdx++;
+            }, 100);
+
+            // 3-Second Countdown Sequence
+            let count = 3;
+            countdownNum.innerText = count;
+            countdownNum.className = "text-7xl font-black font-display text-amber-400 pop-animation";
+            countdownSub.innerText = "가위...";
+            playSoundEffect('tick');
+
+            const timer = setInterval(() => {
+                count--;
+                if (count === 2) {
+                    countdownNum.innerText = count;
+                    countdownSub.innerText = "바위...";
+                    playSoundEffect('tick');
+                    // Reset animation class for re-triggering pop effect
+                    countdownNum.classList.remove('pop-animation');
+                    void countdownNum.offsetWidth; // reflow
+                    countdownNum.classList.add('pop-animation');
+                } else if (count === 1) {
+                    countdownNum.innerText = count;
+                    countdownSub.innerText = "보!...";
+                    playSoundEffect('tick');
+                    countdownNum.classList.remove('pop-animation');
+                    void countdownNum.offsetWidth;
+                    countdownNum.classList.add('pop-animation');
+                } else if (count <= 0) {
+                    clearInterval(timer);
+                    clearInterval(shuffleInterval);
+                    countdownOverlay.classList.add('hidden');
+                    playSoundEffect('go');
+
+                    // Resolve Match Result
+                    evaluateRound();
+
+                    isCountingDown = false;
+                    startBtn.disabled = false;
+                    startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+            }, 1000);
+        }
+
+        function evaluateRound() {
+            // Determine Player Hand
+            let userHand = currentDetectedGesture;
+            
+            // If camera detected background or failed to detect, fallback or prompt
+            if (!userHand || userHand === HAND_TYPES.NONE) {
+                // If in manual mode fallback to manual hand
+                if (isManualMode) {
+                    userHand = manualHand;
+                } else {
+                    // Default fallback to rock if recognition fails, with warning message
+                    userHand = HAND_TYPES.ROCK;
+                }
+            }
+
+            // Random Computer Choice
+            const choices = [HAND_TYPES.ROCK, HAND_TYPES.SCISSORS, HAND_TYPES.PAPER];
+            const comHand = choices[Math.floor(Math.random() * choices.length)];
+
+            // Display Choices in UI
+            const userDetails = HAND_DETAILS[userHand];
+            const comDetails = HAND_DETAILS[comHand];
+
+            document.getElementById('user-hand-emoji').innerText = userDetails.emoji;
+            document.getElementById('user-hand-label').innerText = userDetails.label;
+
+            document.getElementById('com-hand-emoji').innerText = comDetails.emoji;
+            document.getElementById('com-hand-label').innerText = comDetails.label;
+
+            // Trigger shake animation on computer hand box
+            const comBox = document.getElementById('com-hand-box');
+            comBox.classList.add('shake-anim');
+            setTimeout(() => comBox.classList.remove('shake-anim'), 600);
+
+            // Judge Outcome
+            // Win matrix: rock > scissors, scissors > paper, paper > rock
+            let outcome = ''; // 'win', 'lose', 'draw'
+
+            if (userHand === comHand) {
+                outcome = 'draw';
+            } else if (
+                (userHand === HAND_TYPES.ROCK && comHand === HAND_TYPES.SCISSORS) ||
+                (userHand === HAND_TYPES.SCISSORS && comHand === HAND_TYPES.PAPER) ||
+                (userHand === HAND_TYPES.PAPER && comHand === HAND_TYPES.ROCK)
+            ) {
+                outcome = 'win';
+            } else {
+                outcome = 'lose';
+            }
+
+            // Update Scores & UI
+            matchCount++;
+            const banner = document.getElementById('match-banner');
+            const bannerText = document.getElementById('banner-text');
+
+            if (outcome === 'win') {
+                userScore += 10;
+                currentStreak++;
+                if (currentStreak > maxStreak) maxStreak = currentStreak;
+
+                banner.className = "w-full text-center py-2 px-4 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold transition-all duration-300";
+                bannerText.innerHTML = `🎉 <span class="text-white">승리했습니다! (+10점)</span> (나: ${userDetails.emoji} ${userDetails.label} vs AI: ${comDetails.emoji} ${comDetails.label})`;
+                
+                playSoundEffect('win');
+                triggerConfetti();
+
+            } else if (outcome === 'lose') {
+                comScore += 10;
+                currentStreak = 0; // Reset streak on loss
+
+                banner.className = "w-full text-center py-2 px-4 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold transition-all duration-300";
+                bannerText.innerHTML = `😭 <span class="text-white">아쉬운 패배!</span> (나: ${userDetails.emoji} ${userDetails.label} vs AI: ${comDetails.emoji} ${comDetails.label})`;
+                
+                playSoundEffect('lose');
+
+            } else { // Draw
+                banner.className = "w-full text-center py-2 px-4 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold transition-all duration-300";
+                bannerText.innerHTML = `🤝 <span class="text-white">무승부입니다!</span> (나: ${userDetails.emoji} ${userDetails.label} vs AI: ${comDetails.emoji} ${comDetails.label})`;
+                
+                playSoundEffect('draw');
+            }
+
+            // Update Scoreboard Elements
+            document.getElementById('user-score').innerText = userScore;
+            document.getElementById('com-score').innerText = comScore;
+            document.getElementById('win-streak').innerText = `${currentStreak} 🔥`;
+            document.getElementById('max-streak-label').innerText = `최고 연승: ${maxStreak}`;
+
+            // Append to Match History Log
+            addHistoryLog(matchCount, outcome, userDetails, comDetails);
+        }
+
+        function addHistoryLog(roundNum, outcome, userDetails, comDetails) {
+            const historyList = document.getElementById('history-list');
+            
+            // Remove empty placeholder
+            if (roundNum === 1) {
+                historyList.innerHTML = '';
+            }
+
+            let badgeHtml = '';
+            if (outcome === 'win') {
+                badgeHtml = '<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold text-[10px]">승리</span>';
+            } else if (outcome === 'lose') {
+                badgeHtml = '<span class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 font-bold text-[10px]">패배</span>';
+            } else {
+                badgeHtml = '<span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 font-bold text-[10px]">무승부</span>';
+            }
+
+            const item = document.createElement('div');
+            item.className = 'flex items-center justify-between p-2 rounded-lg bg-slate-950/70 border border-slate-800/80 hover:border-slate-700 transition';
+            item.innerHTML = `
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-mono text-slate-500">#${roundNum}</span>
+                    ${badgeHtml}
+                </div>
+                <div class="flex items-center gap-3 text-slate-300 font-medium">
+                    <span>나: ${userDetails.emoji} ${userDetails.label}</span>
+                    <span class="text-slate-600">vs</span>
+                    <span>AI: ${comDetails.emoji} ${comDetails.label}</span>
+                </div>
+                <span class="text-[10px] text-slate-500 font-mono">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</span>
+            `;
+
+            // Insert at the top
+            historyList.insertBefore(item, historyList.firstChild);
+        }
+
+        function resetScores() {
+            if (confirm("모든 점수와 연승 기록을 초기화하시겠습니까?")) {
+                userScore = 0;
+                comScore = 0;
+                currentStreak = 0;
+                maxStreak = 0;
+                matchCount = 0;
+
+                document.getElementById('user-score').innerText = '0';
+                document.getElementById('com-score').innerText = '0';
+                document.getElementById('win-streak').innerText = '0 🔥';
+                document.getElementById('max-streak-label').innerText = '최고 연승: 0';
+                
+                document.getElementById('history-list').innerHTML = `
+                    <div class="text-slate-500 text-center py-3 italic">
+                        아직 진행된 대결이 없습니다.
+                    </div>
+                `;
+
+                document.getElementById('banner-text').innerText = "점수가 초기화되었습니다. 대결을 다시 시작해보세요!";
+                document.getElementById('match-banner').className = "w-full text-center py-2 px-4 rounded-xl bg-slate-800/60 border border-slate-700/50 mb-4 transition-all duration-300";
+            }
+        }
+
+        function triggerConfetti() {
+            if (typeof confetti === 'function') {
+                confetti({
+                    particleCount: 60,
+                    spread: 70,
+                    origin: { y: 0.7 }
+                });
+            }
+        }
+    </script>
+</body>
+</html>
+
+
